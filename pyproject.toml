@@ -3,6 +3,8 @@ name = "arqect"
 version = "0.1.0"
 description = "Hardware-aware analysis and evaluation of quantum error-correction circuits"
 requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "networkx==3.7",
     "numpy==2.5.4",
