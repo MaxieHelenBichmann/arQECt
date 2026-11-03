@@ -131,6 +131,7 @@ class NoiseModel:
     measurement_noise: ErrorChannel
     reset_noise: ErrorChannel
     idle_noise: Callable[[float], ErrorChannel]
+    hardware_event_noise: ErrorChannel
 
     @classmethod
     def from_specs(
@@ -140,6 +141,7 @@ class NoiseModel:
         measurement: tuple[ErrorType, tuple[float, ...]],
         reset: tuple[ErrorType, tuple[float, ...]],
         idle: tuple[IdleErrorType, tuple[float, ...]],
+        hardware_event: tuple[ErrorType, tuple[float, ...]],
     ) -> NoiseModel:
         """Build the noise model from (error type, parameters) pairs."""
         return cls(
@@ -148,4 +150,5 @@ class NoiseModel:
             measurement_noise=PauliMapping[measurement[0]](measurement[1], 1),
             reset_noise=PauliMapping[reset[0]](reset[1], 1),
             idle_noise=IdleMapping[idle[0]](idle[1]),
+            hardware_event_noise=PauliMapping[hardware_event[0]](hardware_event[1], 1)
         )
