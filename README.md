@@ -2,6 +2,8 @@
 
 Sandbox repository for my Interdisciplinary Project in an Application Subject.
 
+The "results" os this project will be contributed to [QECirc](https://github.com/qecirc/qecirc-website) and [MQT QECC](https://github.com/munich-quantum-toolkit/qecc).
+
 # Idea
 
 Give me a QEC circuit and a hardware platform (with some parameters), and I'll tell you how well suited this circuit is for the platform. "Well suited" here means a combination of compilation cost, runtime cost, and how the hardware-specific noise disrupts the circuit in its quality/effectiveness.
