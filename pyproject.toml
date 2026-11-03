@@ -1,0 +1,41 @@
+[project]
+name = "arqect"
+version = "0.1.0"
+description = "Hardware-aware analysis and evaluation of quantum error-correction circuits"
+requires-python = ">=3.13"
+dependencies = [
+    "networkx==3.7",
+    "numpy==2.5.4",
+    "stim==1.16.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy==2.4.1",
+    "pytest==9.2.0",
+    "ruff==0.17.3",
+]
+
+# Not a distributable package: `uv sync` only creates the environment, and the
+# top-level `src`, `bm` and `tests` packages are imported from the repository root.
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+addopts = "-ra"
+
+[tool.mypy]
+python_version = "3.13"
+ignore_missing_imports = true
+no_site_packages = true
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["data", "playground"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "UP"]
+ignore = ["B905"]

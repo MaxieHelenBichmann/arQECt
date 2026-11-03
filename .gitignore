@@ -1,0 +1,27 @@
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+junit.xml
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+
+# Local-only: playground, scratch files, logs
+playground/
+*sandbox*
+*tmp*
+*.log
+
+# Generated outputs (benchmarks, compiler comparisons, plots)
+results/*
+!results/.gitkeep
