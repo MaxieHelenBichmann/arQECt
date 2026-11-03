@@ -6,7 +6,15 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 junit.xml
+build/
+dist/
+*.egg-info/
+
+# Local secrets and environment variables
+.env
 
 # Notebooks checkpoints
 .ipynb_checkpoints/
