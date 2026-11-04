@@ -75,6 +75,7 @@ class TrappedIonsModel(GateProcessor):
                 if zone_id_src is not None:
                     cached_zone, not_cached_qubit, cached_qubit = zone_id_src, tgt_qubit, src_qubit
                 else:
+                    assert zone_id_tgt is not None  # guaranteed and necessary for mypy
                     cached_zone, not_cached_qubit, cached_qubit = zone_id_tgt, src_qubit, tgt_qubit
 
                 self.zones[cached_zone][cached_qubit] = self.lru_time_step
@@ -99,7 +100,7 @@ class TrappedIonsModel(GateProcessor):
         minimal_cost = min(costs)
         minimal_zones = [i for i, cost in enumerate(costs) if cost == minimal_cost]
 
-        return random.choice(minimal_zones) # choose to only evict 1 or 2 "average-oldest" qubits within one zone
+        return random.choice(minimal_zones) # choose zone to only evict 1 or 2 "average-oldest" qubits within one zone
 
     def _add_qubit_to_zone(self, qubit: int, zone_id: int) -> None:
         if len(self.zones[zone_id]) < self.interaction_zone_capacity:
@@ -108,7 +109,7 @@ class TrappedIonsModel(GateProcessor):
             self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
             self.hardware_events["interaction_zone_entry"] += 1
         else: # evict (will never evict the cached partner qubit of a two-qubit gate, as it is most recently used and there exists at least one more stale qubit in the zone as it is full and at least of size 2)
-            lru_qubit = min(self.zones[zone_id], key=self.zones[zone_id].get)
+            lru_qubit = min(self.zones[zone_id], key=self.zones[zone_id].__getitem__)
             del self.zones[zone_id][lru_qubit]
             self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], self.noise_model.hardware_event_noise.gate_arguments)
             self.hardware_events["interaction_zone_eviction"] += 1
