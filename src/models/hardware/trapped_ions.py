@@ -13,68 +13,95 @@ import stim
 import random
 
 from src.models.noise.noise import NoiseModel
-from src.models.hardware.common import HardwareModel, ExecutionProxyMetrics
+from src.analyzer import GateProcessor
 
 
-class TrappedIons(HardwareModel):
-    def __init__(self, interaction_zone_capacity: int, nr_interaction_sites: int):
-        self.interaction_zone_capacity = interaction_zone_capacity
-        self.nr_interaction_sites = nr_interaction_sites
+class TrappedIonsModel(GateProcessor):
+    def __init__(self, interaction_zone_capacity: int, nr_interaction_sites: int, noise_model: NoiseModel):
+        self.interaction_zone_capacity: int = interaction_zone_capacity
+        self.nr_interaction_sites: int = nr_interaction_sites
+        self.noise_model: NoiseModel = noise_model
 
-    def abstract_execution(self, circuit: stim.Circuit, noise_model: NoiseModel) -> tuple[stim.Circuit, ExecutionProxyMetrics]:
-        """Executes a circuit on the trapped ion model, extracting the execution proxy (interaction zone entries and evictions) and constructing a noisy circuit on its basis."""
-        hardware_events = {"interaction_zone_entry": 0, "interaction_zone_eviction": 0}
-        noise_circuit = stim.Circuit()
+        self.hardware_events={"interaction_zone_entry": 0, "interaction_zone_eviction": 0}
+        self.noisy_circuit: stim.Circuit = stim.Circuit()
 
-        zones: tuple[dict[int, int], ...] = tuple(dict() for _ in range(self.nr_interaction_sites))
-        lru_time_step = 0
-   
+        self.zones: tuple[dict[int, int], ...] = tuple(dict() for _ in range(self.nr_interaction_sites))
+        self.lru_time_step: int = 0
+
+    def process(self, gate: stim.CircuitInstruction, _ :int) -> None:
+        """Executes a gate on the trapped ion model, extracting the execution proxy (interaction zone entries and evictions) and constructing a noisy circuit on its basis."""
+
         def choose_zone(qubit_count: int) -> int:
-            free_zones = [i for i, zone in enumerate(zones) if len(zone) + qubit_count <= self.interaction_zone_capacity]
+            free_zones = [i for i, zone in enumerate(self.zones) if len(zone) + qubit_count <= self.interaction_zone_capacity]
             if free_zones:
                 return random.choice(free_zones)
 
-            costs = min([sum(sorted(zone.values())[:qubit_count]) for zone in zones])
+            costs = [sum(sorted(zone.values())[:qubit_count]) for zone in self.zones]
             minimal_cost = min(costs)
             minimal_zones = [i for i, cost in enumerate(costs) if cost == minimal_cost]
 
-            return random.choice(minimal_zones) # need to evict oldest 1 or 2 qubits from same zone 
+            return random.choice(minimal_zones) # choose to only evict 1 or 2 "average-oldest" qubits within one zone
 
-        for op in circuit:
-            for gate in op.target_groups(): # assume there are no stim.CircuitRepeatBlock, DETECTOR, OBSERVABLE_INCLUDE, QUBIT_COORDS, noisy gates, assume only 1q and 2q gates
+        def add_qubit_to_zone(qubit: int, zone_id: int):
+            if len(self.zones[zone_id]) < self.interaction_zone_capacity:
+                self.zones[zone_id][qubit] = self.lru_time_step
+                self.lru_time_step += 1
+                self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], *self.noise_model.hardware_event_noise.gate_arguments)
+                self.hardware_events["interaction_zone_entry"] += 1
+            else: # evict
+                lru_qubit = min(self.zones[zone_id], key=self.zones[zone_id].get)
+                del self.zones[zone_id][lru_qubit]
+                self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], *self.noise_model.hardware_event_noise.gate_arguments)
+                self.hardware_events["interaction_zone_eviction"] += 1
 
-                if stim.gate_data(op.name).is_single_qubit_gate:
-                    qubit = gate[0].qubit_value
+                self.zones[zone_id][qubit] = self.lru_time_step
+                self.lru_time_step += 1
+                self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], *self.noise_model.hardware_event_noise.gate_arguments)
+                self.hardware_events["interaction_zone_entry"] += 1
 
-                    target_zone = [i for i, zone in enumerate(zones) if qubit in zone.keys()]
-                    if target_zone: # Cache Hit
-                        zone_id = target_zone[0]
-                        zones[zone_id][qubit] = lru_time_step
-                        lru_time_step += 1
-                    else: # Cache Miss
-                        zone_id = choose_zone(1)
+        if stim.gate_data(gate.name).is_single_qubit_gate:
+            qubit = gate.targets_copy()[0].value
+            zone_id = next((i for i, zone in enumerate(self.zones) if qubit in zone), None)
 
-                        if len(zones[zone_id]) < self.interaction_zone_capacity:
-                            zones[zone_id][qubit] = lru_time_step
-                            lru_time_step += 1
-                            noise_circuit.append(noise_model.hardware_event_noise.gate_name, [qubit], *noise_model.hardware_event_noise.gate_arguments)
-                            hardware_events["interaction_zone_entry"] += 1
-                        else: # evict
-                            lru_qubit = min(zones[zone_id], key=zones[zone_id].get)
-                            del zones[zone_id][lru_qubit]
-                            noise_circuit.append(noise_model.hardware_event_noise.gate_name, [lru_qubit], *noise_model.hardware_event_noise.gate_arguments)
-                            hardware_events["interaction_zone_eviction"] += 1
-            
-                            zones[zone_id][qubit] = lru_time_step
-                            lru_time_step += 1
-                            noise_circuit.append(noise_model.hardware_event_noise.gate_name, [qubit], *noise_model.hardware_event_noise.gate_arguments)
-                            hardware_events["interaction_zone_entry"] += 1
-                    
+            if zone_id is not None: # Cache Hit
+                self.zones[zone_id][qubit] = self.lru_time_step
+                self.lru_time_step += 1
+            else: # Cache Miss
+                zone_id = choose_zone(1)
+                add_qubit_to_zone(qubit, zone_id)
 
+            self.noisy_circuit.append(gate)
+
+        elif stim.gate_data(gate.name).is_two_qubit_gate:
+            src_qubit = gate.targets_copy()[0].value
+            tgt_qubit = gate.targets_copy()[1].value
+
+            zone_id_src = next((i for i, zone in enumerate(self.zones) if src_qubit in zone), None)
+            zone_id_tgt = next((i for i, zone in enumerate(self.zones) if tgt_qubit in zone), None)
+
+            if zone_id_src is not None and zone_id_tgt is not None: # Cache Hit
+                if zone_id_src == zone_id_tgt: # both in same zone
+                    self.zones[zone_id_src][src_qubit] = self.lru_time_step
+                    self.lru_time_step += 1
+                    self.zones[zone_id_tgt][tgt_qubit] = self.lru_time_step
+                    self.lru_time_step += 1
+                else: # both in different zones: Target -> Source
+                    del self.zones[zone_id_tgt][tgt_qubit]
+                    self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [tgt_qubit], *self.noise_model.hardware_event_noise.gate_arguments)
+                    self.hardware_events["interaction_zone_eviction"] += 1
+
+                    add_qubit_to_zone(tgt_qubit, zone_id_src)
+
+            elif (zone_id_src is None) != (zone_id_tgt is None): # Partial Cache Hit
+                if zone_id_src is not None:
+                    cached_zone, not_cached_qubit = zone_id_src, tgt_qubit
                 else:
-                    pass
+                    cached_zone, not_cached_qubit = zone_id_tgt, src_qubit
 
-               
+                add_qubit_to_zone(not_cached_qubit, cached_zone)
 
+            else: # Cache Miss
+                zone_id = choose_zone(2)
 
-        return noise_circuit, ExecutionProxyMetrics(hardware_events=hardware_events)
+                add_qubit_to_zone(src_qubit, zone_id)
+                add_qubit_to_zone(tgt_qubit, zone_id)
