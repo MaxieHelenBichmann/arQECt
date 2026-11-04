@@ -3,7 +3,7 @@ import stim
 
 
 class GateProcessor(Protocol):
-    def process(self, gate: stim.CircuitInstruction, index: int) -> None:
+    def process(self, gate: stim.CircuitInstruction) -> None:
         ...
 
 
@@ -12,7 +12,6 @@ class CircuitAnalyzer:
         self.processors = processors
 
     def run(self, circuit: stim.Circuit):
-        index = 0
         for op in circuit:
             if isinstance(op, stim.CircuitRepeatBlock):
                 raise ValueError("unsupported instruction: REPEAT blocks")
@@ -27,5 +26,4 @@ class CircuitAnalyzer:
                 
                 gate = stim.CircuitInstruction(op.name, group, op.gate_args_copy(), tag=op.tag)
                 for processor in self.processors:
-                    processor.process(gate, index)
-                index += 1
+                    processor.process(gate)

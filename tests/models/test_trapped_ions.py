@@ -121,7 +121,7 @@ def test_two_qubit_gate_in_different_zones_moves_target_to_source():
     model.zones[1][1] = 1
     model.lru_time_step = 2
 
-    model.process(stim.CircuitInstruction("CX", [0, 1]), 0)
+    model.process(stim.CircuitInstruction("CX", [0, 1]))
 
     assert model.zones == ({0: 2, 1: 3}, {})  # source is touched before the target enters
     assert model.hardware_events == {"interaction_zone_entry": 1, "interaction_zone_eviction": 1}
@@ -199,11 +199,11 @@ def test_steane_two_qubit_gates_are_executed_within_one_zone(capacity: int, nr_z
     split_gates = []
 
     class CoLocationCheck:
-        def process(self, gate: stim.CircuitInstruction, index: int) -> None:
+        def process(self, gate: stim.CircuitInstruction) -> None:
             if stim.gate_data(gate.name).is_two_qubit_gate:
                 src, tgt = (target.value for target in gate.targets_copy())
                 if zone_of(model, src) is None or zone_of(model, src) != zone_of(model, tgt):
-                    split_gates.append((index, gate))
+                    split_gates.append(gate)
 
     CircuitAnalyzer(model, CoLocationCheck()).run(STEANE)
 

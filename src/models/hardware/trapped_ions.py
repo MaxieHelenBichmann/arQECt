@@ -33,7 +33,7 @@ class TrappedIonsModel(GateProcessor):
         self.zones: tuple[dict[int, int], ...] = tuple(dict() for _ in range(self.nr_interaction_sites))
         self.lru_time_step: int = 0
 
-    def process(self, gate: stim.CircuitInstruction, _ :int) -> None:
+    def process(self, gate: stim.CircuitInstruction) -> None:
         """Executes a gate on the trapped ion model, extracting the execution proxy (interaction zone entries and evictions) and constructing a noisy circuit on its basis."""
 
         if stim.gate_data(gate.name).is_single_qubit_gate:
