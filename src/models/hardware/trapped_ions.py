@@ -47,7 +47,16 @@ class TrappedIonsModel(GateProcessor):
                 zone_id = self._choose_zone(1)
                 self._add_qubit_to_zone(qubit, zone_id)
 
-            self.noisy_circuit.append(gate)
+            data = stim.gate_data(gate.name)
+            if data.produces_measurements:
+                self.noisy_circuit.append(gate.name, gate.targets_copy(), self.noise_model.measurement_noise.gate_arguments or gate.gate_args_copy())
+            else:
+                self.noisy_circuit.append(gate)
+                if data.is_reset:
+                    if self.noise_model.reset_noise.gate_name != "I":
+                        self.noisy_circuit.append(self.noise_model.reset_noise.gate_name, [qubit], self.noise_model.reset_noise.gate_arguments)
+                elif self.noise_model.single_qubit_gate_noise.gate_name != "I":
+                    self.noisy_circuit.append(self.noise_model.single_qubit_gate_noise.gate_name, [qubit], self.noise_model.single_qubit_gate_noise.gate_arguments)
 
         elif stim.gate_data(gate.name).is_two_qubit_gate:
             src_qubit = gate.targets_copy()[0].value
@@ -64,7 +73,8 @@ class TrappedIonsModel(GateProcessor):
                     self._lru_time_step += 1
                 else: # both in different zones: Target -> Source
                     del self._zones[zone_id_tgt][tgt_qubit]
-                    self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [tgt_qubit], self.noise_model.hardware_event_noise.gate_arguments)
+                    if self.noise_model.hardware_event_noise.gate_name != "I":
+                        self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [tgt_qubit], self.noise_model.hardware_event_noise.gate_arguments)
                     self.hardware_events["interaction_zone_eviction"] += 1
 
                     self._zones[zone_id_src][src_qubit] = self._lru_time_step
@@ -90,6 +100,8 @@ class TrappedIonsModel(GateProcessor):
                 self._add_qubit_to_zone(tgt_qubit, zone_id)
 
             self.noisy_circuit.append(gate)
+            if self.noise_model.two_qubit_gate_noise.gate_name != "I":
+                self.noisy_circuit.append(self.noise_model.two_qubit_gate_noise.gate_name, [src_qubit, tgt_qubit], self.noise_model.two_qubit_gate_noise.gate_arguments)
 
     def _choose_zone(self, qubit_count: int) -> int:
         free_zones = [i for i, zone in enumerate(self._zones) if len(zone) + qubit_count <= self.interaction_zone_capacity]
@@ -106,17 +118,20 @@ class TrappedIonsModel(GateProcessor):
         if len(self._zones[zone_id]) < self.interaction_zone_capacity:
             self._zones[zone_id][qubit] = self._lru_time_step
             self._lru_time_step += 1
-            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
+            if self.noise_model.hardware_event_noise.gate_name != "I":
+                self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
             self.hardware_events["interaction_zone_entry"] += 1
         else: # evict (will never evict the cached partner qubit of a two-qubit gate, as it is most recently used and there exists at least one more stale qubit in the zone as it is full and at least of size 2)
             lru_qubit = min(self._zones[zone_id], key=self._zones[zone_id].__getitem__)
             del self._zones[zone_id][lru_qubit]
-            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], self.noise_model.hardware_event_noise.gate_arguments)
+            if self.noise_model.hardware_event_noise.gate_name != "I":
+                self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], self.noise_model.hardware_event_noise.gate_arguments)
             self.hardware_events["interaction_zone_eviction"] += 1
 
             self._zones[zone_id][qubit] = self._lru_time_step
             self._lru_time_step += 1
-            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
+            if self.noise_model.hardware_event_noise.gate_name != "I":
+                self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
             self.hardware_events["interaction_zone_entry"] += 1
 
     def __repr__(self) -> str:

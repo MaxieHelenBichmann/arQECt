@@ -11,12 +11,18 @@ from src.models.noise.noise import NoiseModel
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
 
 
-def make_noise_model(hardware_event: tuple = ("Depolarize", (0.01,))) -> NoiseModel:
+def make_noise_model(
+    hardware_event: tuple = ("Depolarize", (0.01,)),
+    single_qubit_gate: tuple = ("None", ()),
+    two_qubit_gate: tuple = ("None", ()),
+    measurement: tuple = ("None", ()),
+    reset: tuple = ("None", ()),
+) -> NoiseModel:
     return NoiseModel.from_specs(
-        single_qubit_gate=("None", ()),
-        two_qubit_gate=("None", ()),
-        measurement=("None", ()),
-        reset=("None", ()),
+        single_qubit_gate=single_qubit_gate,
+        two_qubit_gate=two_qubit_gate,
+        measurement=measurement,
+        reset=reset,
         idle=("ThermalRelaxation", (100e-6, 80e-6)),
         hardware_event=hardware_event,
     )
@@ -167,6 +173,56 @@ def test_hardware_event_noise_with_multiple_arguments():
     model = run("H 0", capacity=2, nr_zones=1, hardware_event=("Pauli", (0.01, 0.02, 0.03)))
 
     assert model.noisy_circuit == stim.Circuit("PAULI_CHANNEL_1(0.01, 0.02, 0.03) 0\nH 0")
+
+
+def test_single_qubit_gate_noise_is_applied_after_the_gate():
+    model = run("H 0", capacity=2, nr_zones=1, single_qubit_gate=("Depolarize", (0.001,)))
+
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nH 0\nDEPOLARIZE1(0.001) 0")
+
+
+def test_reset_noise_is_applied_after_the_reset():
+    model = run("R 0", capacity=2, nr_zones=1, reset=("BitFlip", (0.02,)))
+
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nR 0\nX_ERROR(0.02) 0")
+
+
+def test_measurement_noise_is_the_flip_probability_of_the_measurement_in_its_basis():
+    model = run("M 0\nMX 0\nMR 0", capacity=2, nr_zones=1, measurement=("Measurement", (0.03,)))
+
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nM(0.03) 0\nMX(0.03) 0\nMR(0.03) 0")
+
+
+def test_measurement_noise_flips_the_measurement_result():
+    model = run("R 0\nM 0", capacity=2, nr_zones=1, hardware_event=("None", ()), measurement=("Measurement", (1.0,)))
+
+    assert model.noisy_circuit.compile_sampler().sample(1)[0].tolist() == [True]
+
+
+def test_measurement_without_measurement_noise_keeps_its_own_arguments():
+    model = run("M(0.02) 0", capacity=2, nr_zones=1)
+
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nM(0.02) 0")
+
+
+def test_two_qubit_gate_noise_is_applied_to_both_qubits_after_the_gate():
+    model = run("CX 0 1", capacity=2, nr_zones=1, two_qubit_gate=("Depolarize", (0.005,)))
+
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0 1\nCX 0 1\nDEPOLARIZE2(0.005) 0 1")
+
+
+def test_no_gate_noise_adds_no_identity_instructions():
+    model = run("R 0\nH 0\nCX 0 1\nM 0", capacity=2, nr_zones=1)
+
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nR 0\nH 0\nDEPOLARIZE1(0.01) 1\nCX 0 1\nM 0")
+
+
+def test_no_hardware_event_noise_adds_no_identity_instructions():
+    # capacity 2 with 3 qubits forces entries and evictions
+    model = run("H 0\nH 1\nH 2\nCX 0 1", capacity=2, nr_zones=1, hardware_event=("None", ()))
+
+    assert model.hardware_events["interaction_zone_eviction"] > 0
+    assert model.noisy_circuit == stim.Circuit("H 0 1 2\nCX 0 1")
 
 
 # ---------------------------------------------------------------- small circuits
