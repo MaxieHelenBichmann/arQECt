@@ -1,7 +1,7 @@
 """Class for modeling trapped ion quantum computers, namely quantum charge-coupled devices.
 
 The focus of this model lies on the interaction zones, instead of the fine-grained details of the individual ions shuttled between different traps. This is to allow for a more abstract representation of the hardware, avoiding compiler-specific details to qubit routing and scheduling.
-We abstract away the details of the individual traps, and instead focus on the interaction zones, which are the (only) regions where ions can be manipulated and entangled, as a shared and limited resource. As a consequence, during the abstract execution, the zones become a cache which follows a Last-Recently-Used (LRU) policy.
+We abstract away the details of the individual traps, and instead focus on the interaction zones, which are the (only) regions where ions can be manipulated and entangled, as a shared and limited resource. As a consequence, during the abstract execution, the zones become a cache which follows a Last-Recently-Used (LRU) policy, preferring to move the target qubit in an asymmetric entangling gate.
 
 It uses interaction-zone entry and eviction of the ions as a approximation for general shuttling operations, thus establishing our execution proxy. Thus, these are the relevant hardware events for the noisy circuit.
 
@@ -18,7 +18,12 @@ from src.analysis.analyzer import GateProcessor
 
 class TrappedIonsModel(GateProcessor):
     def __init__(self, interaction_zone_capacity: int, nr_interaction_sites: int, noise_model: NoiseModel):
-        self.interaction_zone_capacity: int = interaction_zone_capacity
+        if interaction_zone_capacity < 2:
+            raise ValueError("Interaction zone capacity must be at least 2.")
+        if nr_interaction_sites < 1:
+            raise ValueError("Number of interaction sites must be at least 1.")
+        
+        self.interaction_zone_capacity: int = interaction_zone_capacity 
         self.nr_interaction_sites: int = nr_interaction_sites
         self.noise_model: NoiseModel = noise_model
 
@@ -59,24 +64,31 @@ class TrappedIonsModel(GateProcessor):
                     self.lru_time_step += 1
                 else: # both in different zones: Target -> Source
                     del self.zones[zone_id_tgt][tgt_qubit]
-                    self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [tgt_qubit], *self.noise_model.hardware_event_noise.gate_arguments)
+                    self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [tgt_qubit], self.noise_model.hardware_event_noise.gate_arguments)
                     self.hardware_events["interaction_zone_eviction"] += 1
 
+                    self.zones[zone_id_src][src_qubit] = self.lru_time_step
+                    self.lru_time_step += 1
                     self._add_qubit_to_zone(tgt_qubit, zone_id_src)
 
             elif (zone_id_src is None) != (zone_id_tgt is None): # Partial Cache Hit
                 if zone_id_src is not None:
-                    cached_zone, not_cached_qubit = zone_id_src, tgt_qubit
+                    cached_zone, not_cached_qubit, cached_qubit = zone_id_src, tgt_qubit, src_qubit
                 else:
-                    cached_zone, not_cached_qubit = zone_id_tgt, src_qubit
+                    cached_zone, not_cached_qubit, cached_qubit = zone_id_tgt, src_qubit, tgt_qubit
 
+                self.zones[cached_zone][cached_qubit] = self.lru_time_step
+                self.lru_time_step += 1
                 self._add_qubit_to_zone(not_cached_qubit, cached_zone)
 
             else: # Cache Miss
                 zone_id = self._choose_zone(2)
 
+
                 self._add_qubit_to_zone(src_qubit, zone_id)
                 self._add_qubit_to_zone(tgt_qubit, zone_id)
+
+            self.noisy_circuit.append(gate)
 
     def _choose_zone(self, qubit_count: int) -> int:
         free_zones = [i for i, zone in enumerate(self.zones) if len(zone) + qubit_count <= self.interaction_zone_capacity]
@@ -89,19 +101,19 @@ class TrappedIonsModel(GateProcessor):
 
         return random.choice(minimal_zones) # choose to only evict 1 or 2 "average-oldest" qubits within one zone
 
-    def _add_qubit_to_zone(self, qubit: int, zone_id: int):
+    def _add_qubit_to_zone(self, qubit: int, zone_id: int) -> None:
         if len(self.zones[zone_id]) < self.interaction_zone_capacity:
             self.zones[zone_id][qubit] = self.lru_time_step
             self.lru_time_step += 1
-            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], *self.noise_model.hardware_event_noise.gate_arguments)
+            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
             self.hardware_events["interaction_zone_entry"] += 1
-        else: # evict
+        else: # evict (will never evict the cached partner qubit of a two-qubit gate, as it is most recently used and there exists at least one more stale qubit in the zone as it is full and at least of size 2)
             lru_qubit = min(self.zones[zone_id], key=self.zones[zone_id].get)
             del self.zones[zone_id][lru_qubit]
-            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], *self.noise_model.hardware_event_noise.gate_arguments)
+            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], self.noise_model.hardware_event_noise.gate_arguments)
             self.hardware_events["interaction_zone_eviction"] += 1
 
             self.zones[zone_id][qubit] = self.lru_time_step
             self.lru_time_step += 1
-            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], *self.noise_model.hardware_event_noise.gate_arguments)
+            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
             self.hardware_events["interaction_zone_entry"] += 1
