@@ -169,3 +169,24 @@ class NeutralAtomsModel(GateProcessor):
         minimal_pairs = [i for i, cost in enumerate(costs) if cost == minimal_cost]
 
         return random.choice(minimal_pairs)
+
+    def __repr__(self) -> str:
+        return (
+            f"NeutralAtomsModel(entanglement_zone_capacity={self.entanglement_zone_capacity}, "
+            f"readout_zone_capacity={self.readout_zone_capacity})"
+        )
+
+    def __str__(self) -> str:
+        lines = [
+            f"NeutralAtomsModel with {self.entanglement_zone_capacity} entanglement pairs and a readout zone of capacity {self.readout_zone_capacity}:",
+            f"  hardware events: {self.hardware_events}",
+            "  entanglement zone (qubit: lru time):",
+            *(f"    pair {i:>3}: {dict(sorted(pair.items()))}" for i, pair in enumerate(self._entanglement_zone)),
+            f"  readout zone (qubit: lru time): {dict(sorted(self._readout_zone.items()))}",
+            "  storage zone: all other qubits",
+            "  noisy circuit:",
+            "  ------- start -------",
+            f"{self.noisy_circuit}",
+            "  -------- end --------",
+        ]
+        return "\n".join(lines)
