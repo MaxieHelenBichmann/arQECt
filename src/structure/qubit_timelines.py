@@ -37,3 +37,13 @@ class QubitTimelines(GateProcessor):
             self.timelines[qubits[0]].append(TimelineGate("MS"))
         else:  # single-qubit gate or reset
             self.timelines[qubits[0]].append(TimelineGate("SN"))
+
+    def __repr__(self) -> str:
+        return f"QubitTimelines(nr_qubits={len(self.timelines)})"
+
+    def __str__(self) -> str:
+        lines = [f"QubitTimelines for {len(self.timelines)} qubits (SN: single-qubit/reset, MS: measurement, EN(partner): entangling):"]
+        for qubit in sorted(self.timelines):
+            entries = " ".join(e.kind if e.partner is None else f"{e.kind}({e.partner})" for e in self.timelines[qubit])
+            lines.append(f"  {qubit:>3}: {entries}")
+        return "\n".join(lines)

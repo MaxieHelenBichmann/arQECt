@@ -118,3 +118,20 @@ class TrappedIonsModel(GateProcessor):
             self._lru_time_step += 1
             self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
             self.hardware_events["interaction_zone_entry"] += 1
+
+    def __repr__(self) -> str:
+        return (
+            f"TrappedIonsModel(interaction_zone_capacity={self.interaction_zone_capacity}, "
+            f"nr_interaction_sites={self.nr_interaction_sites})"
+        )
+
+    def __str__(self) -> str:
+        lines = [
+            f"TrappedIonsModel with {self.nr_interaction_sites} interaction zones of capacity {self.interaction_zone_capacity}:",
+            f"  hardware events: {self.hardware_events}",
+            "  noisy circuit:",
+            "  ------- start -------",
+            f"{self.noisy_circuit}",
+            "  -------- end --------",
+        ]
+        return "\n".join(lines)

@@ -26,7 +26,7 @@ class DependencyDAG(GateProcessor):
         self.dag: defaultdict[int, DAGGate] = {}
         self._index = 0
 
-        self._last_gate: dict[int, int] = {} 
+        self._last_gate: dict[int, int] = {}
 
     def process(self, gate: stim.CircuitInstruction) -> None:
         qubits = tuple(t.value for t in gate.targets_copy())
@@ -37,3 +37,15 @@ class DependencyDAG(GateProcessor):
         for q in qubits:
             self._last_gate[q] = self._index
         self._index += 1
+
+    def __repr__(self) -> str:
+        return f"DependencyDAG(nr_gates={len(self.dag)})"
+
+    def __str__(self) -> str:
+        lines = [f"DependencyDAG with {len(self.dag)} gates (index: qubits | predecessors --> successors):"]
+        for index, node in self.dag.items():
+            predecessors = ", ".join(map(str, sorted(node.predecessors))) or "-"
+            successors = ", ".join(map(str, sorted(node.successors))) or "-"
+            lines.append(f"  {index:>3}: {node.qubits} | {predecessors} --> {successors}")
+        return "\n".join(lines)
+    
