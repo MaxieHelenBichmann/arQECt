@@ -15,6 +15,8 @@ from src.analysis.analyzer import GateProcessor
 from src.models.noise.noise import NoiseModel
 import stim
 
+# TODO: measurement leaves qubit in readout, how realistic?
+
 class NeutralAtomsModel(GateProcessor):
     def __init__(self, entanglement_zone_capacity: int, readout_zone_capacity: int, noise_model: NoiseModel):
         # entanglement_zone_capacity in qubit PAIRS
