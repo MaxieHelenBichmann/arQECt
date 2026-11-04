@@ -13,7 +13,7 @@ import stim
 import random
 
 from src.models.noise.noise import NoiseModel
-from src.analyzer import GateProcessor
+from src.analysis.analyzer import GateProcessor
 
 
 class TrappedIonsModel(GateProcessor):

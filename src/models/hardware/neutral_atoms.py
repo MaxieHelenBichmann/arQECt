@@ -1,4 +1,4 @@
-from src.analyzer import GateProcessor
+from src.analysis.analyzer import GateProcessor
 import stim
 
 class NeutralAtomsModel(GateProcessor):
