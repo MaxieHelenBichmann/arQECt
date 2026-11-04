@@ -68,3 +68,5 @@ uv run mypy src/                  # type-check
 uv run python -m bm.model_accuracy.compiler
 uv run python -m bm.performance.runner
 ```
+
+only tests are Ai generated until now, will be adapted later
