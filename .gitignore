@@ -29,6 +29,8 @@ playground/
 *sandbox*
 *tmp*
 *.log
+*.svg
+*.png
 
 # Generated outputs (benchmarks, compiler comparisons, plots)
 results/*
