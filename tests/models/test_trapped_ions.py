@@ -166,6 +166,15 @@ def test_choose_zone_minimizes_summed_lru_times_of_evicted_qubits():
     assert model._choose_zone(2) == 0  # costs: 11 vs. 21
 
 
+def test_choose_zone_for_two_qubits_prefers_zones_with_one_spot_left():
+    model = TrappedIonsModel(3, 3, make_noise_model())
+    model._zones[0].update({0: 10, 1: 11})  # one spot left: one eviction
+    model._zones[1].update({2: 0, 3: 1, 4: 2})  # full: two evictions, but oldest qubits
+    model._zones[2].update({5: 12, 6: 13})  # one spot left: one eviction, but newer qubits
+
+    assert model._choose_zone(2) == 0
+
+
 # ---------------------------------------------------------------- noise
 
 

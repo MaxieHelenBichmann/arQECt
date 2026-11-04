@@ -5,6 +5,8 @@ We abstract away the details of the individual traps, and instead focus on the i
 
 It uses interaction-zone entry and eviction of the ions as a approximation for general shuttling operations, thus establishing our execution proxy. Thus, these are the relevant hardware events for the noisy circuit.
 
+All ions are assumed to start outside of an interaction zone.
+
 Different hardware-architectures can be modeled by varying the number of interaction zones, and the capacity of the zones. Concrete topology constrains are however not modelled, as an average shuttling cost is used.
 """
 
@@ -30,7 +32,7 @@ class TrappedIonsModel(GateProcessor):
         self.hardware_events={"interaction_zone_entry": 0, "interaction_zone_eviction": 0}
         self.noisy_circuit: stim.Circuit = stim.Circuit()
 
-        self._zones: tuple[dict[int, int], ...] = tuple(dict() for _ in range(self.nr_interaction_sites))
+        self._zones: tuple[dict[int, int], ...] = tuple(dict() for _ in range(self.nr_interaction_sites)) # tuple # (qubit -> lru_time_step)
         self._lru_time_step: int = 0
 
     def process(self, gate: stim.CircuitInstruction) -> None:
@@ -104,15 +106,15 @@ class TrappedIonsModel(GateProcessor):
                 self.noisy_circuit.append(self.noise_model.two_qubit_gate_noise.gate_name, [src_qubit, tgt_qubit], self.noise_model.two_qubit_gate_noise.gate_arguments)
 
     def _choose_zone(self, qubit_count: int) -> int:
-        free_zones = [i for i, zone in enumerate(self._zones) if len(zone) + qubit_count <= self.interaction_zone_capacity]
-        if free_zones:
-            return random.choice(free_zones)
+        def eviction_cost(zone: dict[int, int]) -> tuple[int, int]:
+            nr_evictions = max(0, len(zone) + qubit_count - self.interaction_zone_capacity)
+            return nr_evictions, sum(sorted(zone.values())[:nr_evictions])
 
-        costs = [sum(sorted(zone.values())[:qubit_count]) for zone in self._zones]
+        costs = [eviction_cost(zone) for zone in self._zones]
         minimal_cost = min(costs)
         minimal_zones = [i for i, cost in enumerate(costs) if cost == minimal_cost]
 
-        return random.choice(minimal_zones) # choose zone to only evict 1 or 2 "average-oldest" qubits within one zone
+        return random.choice(minimal_zones)
 
     def _add_qubit_to_zone(self, qubit: int, zone_id: int) -> None:
         if len(self._zones[zone_id]) < self.interaction_zone_capacity:

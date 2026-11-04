@@ -1,6 +1,180 @@
+"""Class for modeling neutral atom quantum computers, namely a zoned architecture.
+
+The focus of this model lies on the zones - namely the storage, entanglement, and readout zone - instead of the fine-grained details and spacial rearrangement restrictions of the individual atoms moved with optical tweezers. This is to allow for a more abstract representation of the hardware, avoiding compiler-specific details to qubit routing and scheduling.
+We abstract away the details of the concrete movements, and instead focus on the zones, each with a specific function, as a shared and limited resource. As a consequence, during the abstract execution, the zones become a cache which follows a Last-Recently-Used (LRU) policy, preferring to move the target qubit in an asymmetric entangling gate.
+The storage zones is used to store qubits and perform single-qubit gates, the entanglement zone is used to perform two-qubit gates, and the readout zone is used to perform measurements.
+
+It uses zone entry, eviction and certain movements within a zone of the atoms as a approximation for general movement operations, thus establishing our execution proxy. Thus, these are the relevant hardware events for the noisy circuit.
+
+All atoms are assumed to start in the storage zone.
+
+Different hardware-architectures can be modeled by varying the capacity of the zones, and it is planned to support disallowing single-qubit gates in the storage zone. Concrete topology constrains are however not modelled, as an average movement cost is used.
+"""
+import random
 from src.analysis.analyzer import GateProcessor
+from src.models.noise.noise import NoiseModel
 import stim
 
 class NeutralAtomsModel(GateProcessor):
+    def __init__(self, entanglement_zone_capacity: int, readout_zone_capacity: int, noise_model: NoiseModel):
+        # entanglement_zone_capacity in qubit PAIRS
+        # assume that storage_zone_capacity >= qubits in the circuit
+        
+        self.entanglement_zone_capacity: int = entanglement_zone_capacity
+        self.readout_zone_capacity: int = readout_zone_capacity
+        self.noise_model: NoiseModel = noise_model
+
+        self.hardware_events={"storage_entanglement": 0, "storage_readout": 0, "entanglement_readout": 0, "inter_entanglement": 0} # no order
+        self.noisy_circuit: stim.Circuit = stim.Circuit()
+
+        self._storage_zone: dict[int, int] = {} # (qubit -> lru_time_step)
+        self._readout_zone: dict[int, int] = {} # (qubit -> lru_time_step)
+        self._entanglement_zone: tuple[dict[int, int], ...] = tuple(dict() for _ in range(self.entanglement_zone_capacity)) # tuple of pairs (qubit1 -> lru_time_step), (qubit2 -> lru_time_step)
+        self._lru_time_step: int = 0
+
     def process(self, gate: stim.CircuitInstruction) -> None:
-        raise NotImplementedError("Neutral atoms model is not implemented yet.")
+        """Executes a gate on the neutral atoms model, extracting the execution proxy (zone entries and evictions) and constructing a noisy circuit on its basis."""
+
+        if stim.gate_data(gate.name).is_single_qubit_gate:
+            data = stim.gate_data(gate.name)
+            qubit = gate.targets_copy()[0].value
+            
+            if data.produces_measurements:
+                self._add_to_readout_zone(qubit)
+
+                self.noisy_circuit.append(gate.name, gate.targets_copy(), self.noise_model.measurement_noise.gate_arguments or gate.gate_args_copy())
+            else:
+                self._add_to_storage_zone(qubit)
+
+                self.noisy_circuit.append(gate)
+                if data.is_reset:
+                    if self.noise_model.reset_noise.gate_name != "I":
+                        self.noisy_circuit.append(self.noise_model.reset_noise.gate_name, [qubit], self.noise_model.reset_noise.gate_arguments)
+                elif self.noise_model.single_qubit_gate_noise.gate_name != "I":
+                    self.noisy_circuit.append(self.noise_model.single_qubit_gate_noise.gate_name, [qubit], self.noise_model.single_qubit_gate_noise.gate_arguments)
+
+        elif stim.gate_data(gate.name).is_two_qubit_gate:
+            src_qubit = gate.targets_copy()[0].value
+            tgt_qubit = gate.targets_copy()[1].value
+
+            pair_id_src = next((i for i, p in enumerate(self._entanglement_zone) if src_qubit in p), None)
+            pair_id_tgt = next((i for i, p in enumerate(self._entanglement_zone) if tgt_qubit in p), None)
+
+            if pair_id_src is not None and pair_id_tgt is not None: # Cache Hit
+                if pair_id_src == pair_id_tgt: # both in same zone
+                    self._entanglement_zone[pair_id_src][src_qubit] = self._lru_time_step
+                    self._lru_time_step += 1
+                    self._entanglement_zone[pair_id_tgt][tgt_qubit] = self._lru_time_step
+                    self._lru_time_step += 1
+                else: # both in different zones: Target -> Source
+                    del self._entanglement_zone[pair_id_tgt][tgt_qubit]
+                    if self.noise_model.hardware_event_noise.gate_name != "I":
+                        self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [tgt_qubit], self.noise_model.hardware_event_noise.gate_arguments)
+                    self.hardware_events["inter_entanglement"] += 1
+
+                    self._entanglement_zone[pair_id_src][src_qubit] = self._lru_time_step
+                    self._lru_time_step += 1
+                    self._add_qubit_to_entanglement_pair(tgt_qubit, pair_id_src)
+
+            elif (pair_id_src is None) != (pair_id_tgt is None): # Partial Cache Hit
+                if pair_id_src is not None:
+                    cached_zone, not_cached_qubit, cached_qubit = pair_id_src, tgt_qubit, src_qubit
+                else:
+                    assert pair_id_tgt is not None  # guaranteed and necessary for mypy
+                    cached_zone, not_cached_qubit, cached_qubit = pair_id_tgt, src_qubit, tgt_qubit
+
+                self._entanglement_zone[cached_zone][cached_qubit] = self._lru_time_step
+                self._lru_time_step += 1
+                self._add_qubit_to_entanglement_pair(not_cached_qubit, cached_zone)
+
+            else: # Cache Miss
+                pair_id = self._choose_pair()
+
+                self._add_qubit_to_entanglement_pair(src_qubit, pair_id)
+                self._add_qubit_to_entanglement_pair(tgt_qubit, pair_id)
+
+            self.noisy_circuit.append(gate)
+            if self.noise_model.two_qubit_gate_noise.gate_name != "I":
+                self.noisy_circuit.append(self.noise_model.two_qubit_gate_noise.gate_name, [src_qubit, tgt_qubit], self.noise_model.two_qubit_gate_noise.gate_arguments)
+
+    def _add_qubit_to_entanglement_pair(self, qubit: int, pair_id: int) -> None:
+        if len(self._entanglement_zone[pair_id]) >= 2:
+            lru_qubit = min(self._entanglement_zone[pair_id], key=self._entanglement_zone[pair_id].__getitem__)
+            del self._readout_zone[lru_qubit]
+            if self.noise_model.hardware_event_noise.gate_name != "I":
+                self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], self.noise_model.hardware_event_noise.gate_arguments)
+            self.hardware_events["storage_entanglement"] += 1
+
+        if qubit in self._readout_zone:
+            del self._readout_zone[qubit]
+            self.hardware_events["entanglement_readout"] += 1
+        else: # qubit explicitly or implicitly assumed to be in storage zone
+            if qubit in self._storage_zone:
+                del self._storage_zone[qubit]
+            self.hardware_events["storage_entanglement"] += 1
+
+        self._entanglement_zone[pair_id][qubit] = self._lru_time_step
+        self._lru_time_step += 1
+
+        if self.noise_model.hardware_event_noise.gate_name != "I":
+                        self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], self.noise_model.hardware_event_noise.gate_arguments)
+
+    def _add_to_readout_zone(self, qubit: int) -> None:
+        if qubit in self._readout_zone:
+            self._readout_zone[qubit] = self._lru_time_step
+            self._lru_time_step += 1
+            return
+
+        if len(self._readout_zone) >= self.readout_zone_capacity:
+            lru_qubit = min(self._readout_zone, key=self._readout_zone.__getitem__)
+            del self._readout_zone[lru_qubit]
+            if self.noise_model.hardware_event_noise.gate_name != "I":
+                self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], self.noise_model.hardware_event_noise.gate_arguments)
+            self.hardware_events["storage_readout"] += 1
+        
+        pair = next((p for p in self._entanglement_zone if qubit in p), None)
+        if pair is not None:
+            del pair[qubit]
+            self._readout_zone[qubit] = self._lru_time_step
+            self._lru_time_step += 1
+            self.hardware_events["storage_entanglement"] += 1
+            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
+ 
+        else: # qubit explicitly or implicitly assumed to be in storage zone
+            if qubit in self._storage_zone:
+                del self._storage_zone[qubit]
+            self._readout_zone[qubit] = self._lru_time_step
+            self._lru_time_step += 1
+            self.hardware_events["storage_readout"] += 1
+            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
+
+    def _add_to_storage_zone(self, qubit: int) -> None:
+        pair = next((p for p in self._entanglement_zone if qubit in p), None)
+        if pair is not None:
+            del pair[qubit]
+            self._storage_zone[qubit] = self._lru_time_step
+            self._lru_time_step += 1
+            self.hardware_events["storage_entanglement"] += 1
+            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
+          
+        elif qubit in self._readout_zone:
+            del self._readout_zone[qubit]
+            self._storage_zone[qubit] = self._lru_time_step
+            self._lru_time_step += 1
+            self.hardware_events["storage_readout"] += 1
+            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
+ 
+        else: # qubit explicitly or implicitly assumed to be in storage zone
+            self._storage_zone[qubit] = self._lru_time_step
+            self._lru_time_step += 1
+
+    def _choose_pair(self) -> int:
+        def eviction_cost(pair: dict[int, int]) -> tuple[int, int]:
+            nr_evictions = len(pair)
+            return nr_evictions, sum(pair.values())
+
+        costs = [eviction_cost(pair) for pair in self._entanglement_zone]
+        minimal_cost = min(costs)
+        minimal_pairs = [i for i, cost in enumerate(costs) if cost == minimal_cost]
+
+        return random.choice(minimal_pairs)
