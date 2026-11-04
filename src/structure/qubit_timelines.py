@@ -14,7 +14,7 @@ from collections import defaultdict
 GateKind = Literal["SN", "MS", "EN"]
 
 @dataclass(frozen=True, slots=True)
-class TimelineEntry:
+class TimelineGate:
     kind: GateKind
     partner: int | None = None  
 
@@ -22,7 +22,7 @@ class QubitTimelines(GateProcessor):
     """A class to store the timelines of qubits in a circuit."""
 
     def __init__(self) -> None:
-        self.timelines: defaultdict[int, list[TimelineEntry]] = defaultdict(list)
+        self.timelines: defaultdict[int, list[TimelineGate]] = defaultdict(list)
 
     def process(self, gate: stim.CircuitInstruction) -> None:
         """Processes a gate by adding to the timelines of the qubits involved."""
@@ -31,9 +31,9 @@ class QubitTimelines(GateProcessor):
 
         if data.is_two_qubit_gate:
             src, tgt = qubits
-            self.timelines[src].append(TimelineEntry("EN", tgt))
-            self.timelines[tgt].append(TimelineEntry("EN", src))
+            self.timelines[src].append(TimelineGate("EN", tgt))
+            self.timelines[tgt].append(TimelineGate("EN", src))
         elif data.produces_measurements:
-            self.timelines[qubits[0]].append(TimelineEntry("MS"))
+            self.timelines[qubits[0]].append(TimelineGate("MS"))
         else:  # single-qubit gate or reset
-            self.timelines[qubits[0]].append(TimelineEntry("SN"))
+            self.timelines[qubits[0]].append(TimelineGate("SN"))
