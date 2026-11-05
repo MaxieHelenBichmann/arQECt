@@ -22,7 +22,17 @@ import stim
 
 class SuperconductingQubitsModel(GateProcessor):
     def __init__(self, number_of_qubits: int, gate_durations: dict[GateKind, float], topology: dict[int, int], noise_model: NoiseModel):
-        # assume that sum(topology.values()) >= qubits in the circuit
+        if number_of_qubits < 1:
+            raise ValueError("Number of qubits must be at least 1.")
+        if not all(degree > 0 and count >= 0 for degree, count in topology.items()):
+            raise ValueError("Degrees and counts in the topology must be positive.")
+        if sum(topology.values()) < number_of_qubits:
+            raise ValueError("The sum of the topology counts must be at least the number of qubits.")
+        if not all(kind in gate_durations for kind in ["SN", "EN", "MS"]):
+            raise ValueError("Gate durations must include 'SN', 'EN', and 'MS'.")
+        if not all(duration >= 0 for duration in gate_durations.values()):
+            raise ValueError("All gate durations must be positive.")
+        
         self.number_of_qubits: int = number_of_qubits # needed for idle noise
         self.gate_durations: dict[GateKind, float] = gate_durations # needed for idle noise
         self.topology: dict[int, int] = topology  # degree -> max number of qubits with that degree

@@ -140,12 +140,12 @@ class NoiseModel:
     @classmethod
     def from_specs(
         cls,
-        single_qubit_gate: tuple[ErrorType, tuple[float, ...]],
-        two_qubit_gate: tuple[ErrorType, tuple[float, ...]],
-        measurement: tuple[ErrorType, tuple[float, ...]],
-        reset: tuple[ErrorType, tuple[float, ...]],
-        idle: tuple[IdleErrorType, tuple[float, ...]],
-        hardware_event: tuple[ErrorType, tuple[float, ...]],
+        single_qubit_gate: tuple[ErrorType, tuple[float, ...]] = ("None", ()),
+        two_qubit_gate: tuple[ErrorType, tuple[float, ...]] = ("None", ()),
+        measurement: tuple[ErrorType, tuple[float, ...]] = ("None", ()),
+        reset: tuple[ErrorType, tuple[float, ...]] = ("None", ()),
+        idle: tuple[IdleErrorType, tuple[float, ...]] = ("None", ()),
+        hardware_event: tuple[ErrorType, tuple[float, ...]] = ("None", ()),
     ) -> NoiseModel:
         """Build the noise model from (error type, parameters) pairs."""
         return cls(
