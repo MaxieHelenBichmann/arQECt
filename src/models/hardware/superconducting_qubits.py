@@ -12,6 +12,7 @@ Different hardware-architectures can be modeled by varying the available qubit d
 
 # TODO: this only models immediate neighborhood, and no steps beyond that; as this doesn't model the actual topology we dont have a concrete layout, the focus og SC qubit evaluation lies on the weighted interaction graph and its metrics, not this abstract execution here
 # TODO: T1 and T2 need to be in the same unit ("gate duration")
+# TODO: potentially replace this implementation with a interaction graph based one and a greedy static layout
     
 import random
 from src.analysis.analyzer import GateProcessor
