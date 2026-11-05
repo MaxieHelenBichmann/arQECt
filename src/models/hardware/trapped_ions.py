@@ -31,7 +31,7 @@ class TrappedIonsModel(GateProcessor):
         self.hardware_events={"interaction_zone_entry": 0, "interaction_zone_eviction": 0}
         self.noisy_circuit: stim.Circuit = stim.Circuit()
 
-        self._zones: tuple[dict[int, int], ...] = tuple(dict() for _ in range(self.nr_interaction_sites)) # tuple # (qubit -> lru_time_step)
+        self._zones: tuple[dict[int, int], ...] = tuple(dict() for _ in range(self.nr_interaction_sites)) # tuple of (qubit -> lru_time_step)
         self._lru_time_step: int = 0
 
     def process(self, gate: stim.CircuitInstruction) -> None:
