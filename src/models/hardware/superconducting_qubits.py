@@ -115,7 +115,8 @@ class SuperconductingQubitsModel(GateProcessor):
             idle_time = self._idle_time_steps[q]
             if idle_time > 0:
                 channel = self.noise_model.idle_noise(idle_time)
-                self.noisy_circuit.append(channel.gate_name, [q], channel.gate_arguments)
+                if channel.gate_name != "I":
+                    self.noisy_circuit.append(channel.gate_name, [q], channel.gate_arguments)
 
         for q in self._idle_time_steps.keys():
             if q in qubits:
