@@ -16,6 +16,7 @@ from src.models.noise.noise import NoiseModel
 import stim
 
 # TODO: measurement leaves qubit in readout, how realistic?
+# TODO: does this 1q/2q gate distinction make sense here on this level, bc probably the 2q gates are will be decomposed into 1q and 2q gates during compilation, aka they aren't reused in the ent zone anyway?
 
 class NeutralAtomsModel(GateProcessor):
     def __init__(self, entanglement_zone_capacity: int, readout_zone_capacity: int, noise_model: NoiseModel):
