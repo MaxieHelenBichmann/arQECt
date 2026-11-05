@@ -28,8 +28,6 @@ class SuperconductingQubitsModel(GateProcessor):
             raise ValueError("Degrees and counts in the topology must be positive.")
         if sum(topology.values()) < number_of_qubits:
             raise ValueError("The sum of the topology counts must be at least the number of qubits.")
-        if not all(kind in gate_durations for kind in ["SN", "EN", "MS"]):
-            raise ValueError("Gate durations must include 'SN', 'EN', and 'MS'.")
         if not all(duration >= 0 for duration in gate_durations.values()):
             raise ValueError("All gate durations must be positive.")
         
