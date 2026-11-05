@@ -31,6 +31,7 @@ playground/
 *.log
 *.svg
 *.png
+!docs/**/*.png
 
 # Generated outputs (benchmarks, compiler comparisons, plots)
 results/*
