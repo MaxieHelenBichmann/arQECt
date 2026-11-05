@@ -1,11 +1,11 @@
 """Class for modeling superconducting qubit quantum computers.
 
 The focus of this model lies on the fixed connectivity of the qubits and their interaction neighborhoods, instead of the fine-grained details of the concrete qubit layout and virtual routing. This is to allow for a more abstract representation of the hardware, avoiding compiler-specific details to qubit routing and mapping.
-We abstract away the details of the actual qubit layout, and instead focus on their interaction neighborhoods, in which are the (only) qubits that they can interact with in entangling gates, as a shared and limited resource. As a consequence, during the abstract execution, each qubit has a neighborhood that becomes a cache which follows a Last-Recently-Used (LRU) policy. It a new neighbor is needed, the least recently used qubit in the neighborhood is swapped out, preferring to move the target qubit in an asymmetric entangling gate.
+We abstract away the details of the actual qubit layout, and instead focus on their interaction neighborhoods, in which are the (only) qubits that they can interact with in entangling gates, as a shared and limited resource. As a consequence, during the abstract execution, each qubit has a neighborhood that becomes a cache which follows a Last-Recently-Used (LRU) policy. If a new neighbor is needed, the least recently used qubit in the neighborhood is swapped out, preferring to move the target qubit in an asymmetric entangling gate.
 
 It uses neighborhood entry and eviction of the qubits as a approximation for general virtual swap operations, thus establishing our execution proxy. Thus, these are the relevant hardware events for the noisy circuit.
 
-A initial optimal layout of the qubits is assumed, so that populating the neighborhoods for the first time is cost free. When there are multiple available degrees, they are distributed dynamically to the qubits, and the maximal degree is preferred.
+An initial optimal layout of the qubits is assumed, so that populating the neighborhoods for the first time is cost free. When there are multiple available degrees, they are distributed dynamically to the qubits, and the maximal degree is preferred.
 
 Different hardware-architectures can be modeled by varying the available qubit degrees and their distribution. Concrete topology constrains, thus connections between the neighborhoods, are however not modelled.
 """
@@ -16,12 +16,14 @@ Different hardware-architectures can be modeled by varying the available qubit d
 import random
 from src.analysis.analyzer import GateProcessor
 from src.models.noise.noise import NoiseModel
+from src.models.common import GateKind
 import stim
 
 class SuperconductingQubitsModel(GateProcessor):
-    def __init__(self, number_of_qubits: int, topology: dict[int, int], noise_model: NoiseModel):
+    def __init__(self, number_of_qubits: int, gate_durations: dict[GateKind, float], topology: dict[int, int], noise_model: NoiseModel):
         # assume that sum(topology.values()) >= qubits in the circuit
         self.number_of_qubits: int = number_of_qubits # needed for idle noise
+        self.gate_durations: dict[GateKind, float] = gate_durations # needed for idle noise
         self.topology: dict[int, int] = topology  # degree -> max number of qubits with that degree
         self.noise_model: NoiseModel = noise_model
 
@@ -30,18 +32,18 @@ class SuperconductingQubitsModel(GateProcessor):
 
         self._neighborhoods: dict[int, dict[int, int]] = {q: {} for q in range(number_of_qubits)}  # qubit -> neighborhood (qubit -> lru_time_step)
         self._lru_time_step: int = 0
-        self._idle_time_steps: dict[int, int] = {q: 0 for q in range(number_of_qubits)}  # qubit -> idle time steps since last gate
+        self._idle_time_steps: dict[int, float] = {q: 0 for q in range(number_of_qubits)}  # qubit -> idle time steps since last gate
 
     def process(self, gate: stim.CircuitInstruction) -> None:
         if stim.gate_data(gate.name).is_single_qubit_gate:
             qubit = gate.targets_copy()[0].value
 
-            self._update_idle_noise(qubit)
-
             data = stim.gate_data(gate.name)
             if data.produces_measurements:
+                self._update_idle_noise(self.gate_durations["MS"], qubit)
                 self.noisy_circuit.append(gate.name, gate.targets_copy(), self.noise_model.measurement_noise.gate_arguments or gate.gate_args_copy())
             else:
+                self._update_idle_noise(self.gate_durations["SN"], qubit)
                 self.noisy_circuit.append(gate)
                 if data.is_reset:
                     if self.noise_model.reset_noise.gate_name != "I":
@@ -53,7 +55,7 @@ class SuperconductingQubitsModel(GateProcessor):
             src_qubit = gate.targets_copy()[0].value
             tgt_qubit = gate.targets_copy()[1].value
 
-            self._update_idle_noise(src_qubit, tgt_qubit)
+            self._update_idle_noise(self.gate_durations["EN"], src_qubit, tgt_qubit)
 
             if src_qubit in self._neighborhoods[tgt_qubit] or self._fits((tgt_qubit, src_qubit)):  # Cache Hit or both have room in their neighborhoods
                 pass
@@ -107,7 +109,7 @@ class SuperconductingQubitsModel(GateProcessor):
             self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit_a], self.noise_model.hardware_event_noise.gate_arguments)
             self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit_b], self.noise_model.hardware_event_noise.gate_arguments)
 
-    def _update_idle_noise(self, *qubits: int) -> None:
+    def _update_idle_noise(self, duration: float, *qubits: int) -> None:
         for q in qubits:
             idle_time = self._idle_time_steps[q]
             if idle_time > 0:
@@ -118,5 +120,5 @@ class SuperconductingQubitsModel(GateProcessor):
             if q in qubits:
                 self._idle_time_steps[q] = 0
             else:
-                self._idle_time_steps[q] += len(qubits)
+                self._idle_time_steps[q] += duration
 

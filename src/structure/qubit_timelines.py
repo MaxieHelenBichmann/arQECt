@@ -8,10 +8,9 @@ It is a qubit-centered representation, where each qubit has a timeline of gates 
 from src.analysis.analyzer import GateProcessor
 import stim
 from dataclasses import dataclass
-from typing import Literal
 from collections import defaultdict
 
-GateKind = Literal["SN", "MS", "EN"]
+from src.models.common import GateKind
 
 @dataclass(frozen=True, slots=True)
 class TimelineGate:
