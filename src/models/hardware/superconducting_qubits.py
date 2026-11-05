@@ -123,3 +123,24 @@ class SuperconductingQubitsModel(GateProcessor):
             else:
                 self._idle_time_steps[q] += duration
 
+    def __repr__(self) -> str:
+        return (
+            f"SuperconductingQubitsModel(number_of_qubits={self.number_of_qubits}, "
+            f"gate_durations={self.gate_durations}, topology={self.topology})"
+        )
+
+    def __str__(self) -> str:
+        lines = [
+            f"SuperconductingQubitsModel with {self.number_of_qubits} qubits on topology (degree: count) {self.topology}:",
+            f"  gate durations: {self.gate_durations}",
+            f"  hardware events: {self.hardware_events}",
+            "  neighborhoods (qubit: lru time):",
+            *(f"    {q:>3}: {dict(sorted(n.items()))}" for q, n in sorted(self._neighborhoods.items())),
+            f"  idle times: {self._idle_time_steps}",
+            "  noisy circuit:",
+            "  ------- start -------",
+            f"{self.noisy_circuit}",
+            "  -------- end --------",
+        ]
+        return "\n".join(lines)
+
