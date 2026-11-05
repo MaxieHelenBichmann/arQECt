@@ -103,6 +103,9 @@ def make_thermal_relaxation_idle_channel(input: tuple[float, ...]) -> Callable[[
 
     return idle_error_channel
 
+def make_identity_idle_channel(_: tuple[float, ...]) -> Callable[[float], ErrorChannel]:
+    return lambda t: ErrorChannel("I", [])
+
 
 PauliMapping: Mapping[ErrorType, Callable[[tuple[float, ...], int], ErrorChannel]] = {
     "BitFlip": make_x_error_channel,
@@ -119,6 +122,7 @@ PauliMapping: Mapping[ErrorType, Callable[[tuple[float, ...], int], ErrorChannel
 
 IdleMapping: Mapping[IdleErrorType, Callable[[tuple[float, ...]], Callable[[float], ErrorChannel]]] = {
     "ThermalRelaxation": make_thermal_relaxation_idle_channel,
+    "None": make_identity_idle_channel,
 }
 
 
