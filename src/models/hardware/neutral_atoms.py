@@ -67,12 +67,12 @@ class NeutralAtomsModel(GateProcessor):
             pair_id_tgt = next((i for i, p in enumerate(self._entanglement_zone) if tgt_qubit in p), None)
 
             if pair_id_src is not None and pair_id_tgt is not None: # Cache Hit
-                if pair_id_src == pair_id_tgt: # both in same zone
+                if pair_id_src == pair_id_tgt: # both in same pair
                     self._entanglement_zone[pair_id_src][src_qubit] = self._lru_time_step
                     self._lru_time_step += 1
                     self._entanglement_zone[pair_id_tgt][tgt_qubit] = self._lru_time_step
                     self._lru_time_step += 1
-                else: # both in different zones: Target -> Source
+                else: # both in different pairs: Target -> Source
                     self._entanglement_zone[pair_id_src][src_qubit] = self._lru_time_step
                     self._lru_time_step += 1
                     self._add_qubit_to_entanglement_pair(tgt_qubit, pair_id_src)
@@ -155,7 +155,7 @@ class NeutralAtomsModel(GateProcessor):
         elif qubit in self._readout_zone:
             del self._readout_zone[qubit]
             self.hardware_events["storage_readout"] += 1
-        else: # already in storage zone
+        else:
             return
 
         if self.noise_model.hardware_event_noise.gate_name != "I":
