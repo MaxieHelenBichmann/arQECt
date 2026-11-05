@@ -11,6 +11,7 @@ Different hardware-architectures can be modeled by varying the available qubit d
 """
 
 # TODO: this only models immediate neighborhood, and no steps beyond that; as this doesn't model the actual topology we dont have a concrete layout, the focus og SC qubit evaluation lies on the weighted interaction graph and its metrics, not this abstract execution here
+# TODO: T1 and T2 need to be in the same unit ("gate duration")
     
 import random
 from src.analysis.analyzer import GateProcessor
@@ -18,21 +19,25 @@ from src.models.noise.noise import NoiseModel
 import stim
 
 class SuperconductingQubitsModel(GateProcessor):
-    def __init__(self, topology: dict[int, int], noise_model: NoiseModel):
+    def __init__(self, number_of_qubits: int, topology: dict[int, int], noise_model: NoiseModel):
         # assume that sum(topology.values()) >= qubits in the circuit
+        self.number_of_qubits: int = number_of_qubits # needed for idle noise
         self.topology: dict[int, int] = topology  # degree -> max number of qubits with that degree
         self.noise_model: NoiseModel = noise_model
 
         self.hardware_events={"virtual_swap": 0}
         self.noisy_circuit: stim.Circuit = stim.Circuit()
 
-        # sufficient space is implicit: every qubit that is not in the neighborhood of another qubit is considered to be somewhere else in the topology
-        self._neighborhoods: dict[int, dict[int, int]] = {}  # qubit -> neighborhood (qubit -> lru_time_step)
+        self._neighborhoods: dict[int, dict[int, int]] = {q: {} for q in range(number_of_qubits)}  # qubit -> neighborhood (qubit -> lru_time_step)
         self._lru_time_step: int = 0
+        self._idle_time_steps: dict[int, int] = {q: 0 for q in range(number_of_qubits)}  # qubit -> idle time steps since last gate
 
     def process(self, gate: stim.CircuitInstruction) -> None:
         if stim.gate_data(gate.name).is_single_qubit_gate:
             qubit = gate.targets_copy()[0].value
+
+            self._update_idle_noise(qubit)
+
             data = stim.gate_data(gate.name)
             if data.produces_measurements:
                 self.noisy_circuit.append(gate.name, gate.targets_copy(), self.noise_model.measurement_noise.gate_arguments or gate.gate_args_copy())
@@ -48,9 +53,11 @@ class SuperconductingQubitsModel(GateProcessor):
             src_qubit = gate.targets_copy()[0].value
             tgt_qubit = gate.targets_copy()[1].value
 
-            if src_qubit in self._neighborhoods.get(tgt_qubit, {}) or self._fits((tgt_qubit, src_qubit)):  # Cache Hit or both have room in their neighborhoods
+            self._update_idle_noise(src_qubit, tgt_qubit)
+
+            if src_qubit in self._neighborhoods[tgt_qubit] or self._fits((tgt_qubit, src_qubit)):  # Cache Hit or both have room in their neighborhoods
                 pass
-            elif self._neighborhoods.get(src_qubit): # prefer moving the target qubit to the place of the lru neighbor of src
+            elif self._neighborhoods[src_qubit]: # prefer moving the target qubit to the place of the lru neighbor of src
                 oldest = min(self._neighborhoods[src_qubit].values())
                 lru_qubit = random.choice([q for q, t in self._neighborhoods[src_qubit].items() if t == oldest])
                 self._swap(lru_qubit, tgt_qubit)
@@ -59,8 +66,8 @@ class SuperconductingQubitsModel(GateProcessor):
                 lru_qubit = random.choice([q for q, t in self._neighborhoods[tgt_qubit].items() if t == oldest])
                 self._swap(lru_qubit, src_qubit)
 
-            self._neighborhoods.setdefault(src_qubit, {})[tgt_qubit] = self._lru_time_step
-            self._neighborhoods.setdefault(tgt_qubit, {})[src_qubit] = self._lru_time_step
+            self._neighborhoods[src_qubit][tgt_qubit] = self._lru_time_step
+            self._neighborhoods[tgt_qubit][src_qubit] = self._lru_time_step
             self._lru_time_step += 1
 
             self.noisy_circuit.append(gate)
@@ -68,17 +75,13 @@ class SuperconductingQubitsModel(GateProcessor):
                 self.noisy_circuit.append(self.noise_model.two_qubit_gate_noise.gate_name, [src_qubit, tgt_qubit], self.noise_model.two_qubit_gate_noise.gate_arguments)
 
     def _fits(self, grown: tuple[int, ...]) -> bool:
-        sizes = sorted(
-            [len(n) + grown.count(q) for q, n in self._neighborhoods.items()]
-            + [grown.count(q) for q in set(grown) if q not in self._neighborhoods],  # qubits without a neighborhood yet
-            reverse=True,
-        )
+        sizes = sorted((len(n) + grown.count(q) for q, n in self._neighborhoods.items()), reverse=True)
         slots = sorted((d for d, count in self.topology.items() for _ in range(count)), reverse=True)
         return all(s <= d for s, d in zip(sizes, slots))
 
     def _swap(self, qubit_a: int, qubit_b: int) -> None:
-        a_neighborhood = self._neighborhoods.pop(qubit_a, {})
-        b_neighborhood = self._neighborhoods.pop(qubit_b, {})
+        a_neighborhood = self._neighborhoods[qubit_a]
+        b_neighborhood = self._neighborhoods[qubit_b]
 
         a_back = {n: self._neighborhoods[n].pop(qubit_a) for n in a_neighborhood if n != qubit_b}
         b_back = {n: self._neighborhoods[n].pop(qubit_b) for n in b_neighborhood if n != qubit_a}
@@ -92,17 +95,28 @@ class SuperconductingQubitsModel(GateProcessor):
         def other(q: int) -> int:
             return qubit_b if q == qubit_a else qubit_a if q == qubit_b else q
 
-        if b_neighborhood:
-            self._neighborhoods[qubit_a] = {
-                other(n): t if n == qubit_a else a_neighborhood.get(n, -1) for n, t in b_neighborhood.items()
-            }
-        if a_neighborhood:
-            self._neighborhoods[qubit_b] = {
-                other(n): t if n == qubit_b else b_neighborhood.get(n, -1) for n, t in a_neighborhood.items()
-            }
+        self._neighborhoods[qubit_a] = {
+            other(n): t if n == qubit_a else a_neighborhood.get(n, -1) for n, t in b_neighborhood.items()
+        }
+        self._neighborhoods[qubit_b] = {
+            other(n): t if n == qubit_b else b_neighborhood.get(n, -1) for n, t in a_neighborhood.items()
+        }
 
         self.hardware_events["virtual_swap"] += 1
         if self.noise_model.hardware_event_noise.gate_name != "I":
             self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit_a], self.noise_model.hardware_event_noise.gate_arguments)
             self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit_b], self.noise_model.hardware_event_noise.gate_arguments)
+
+    def _update_idle_noise(self, *qubits: int) -> None:
+        for q in qubits:
+            idle_time = self._idle_time_steps[q]
+            if idle_time > 0:
+                channel = self.noise_model.idle_noise(idle_time)
+                self.noisy_circuit.append(channel.gate_name, [q], channel.gate_arguments)
+
+        for q in self._idle_time_steps.keys():
+            if q in qubits:
+                self._idle_time_steps[q] = 0
+            else:
+                self._idle_time_steps[q] += len(qubits)
 
