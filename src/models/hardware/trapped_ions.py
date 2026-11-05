@@ -10,7 +10,6 @@ All ions are assumed to start outside of an interaction zone.
 Different hardware-architectures can be modeled by varying the number of interaction zones, and the capacity of the zones. Concrete topology constrains are however not modelled, as an average shuttling cost is used.
 """
 
-import numpy as np
 import stim
 import random
 
