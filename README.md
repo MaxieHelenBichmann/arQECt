@@ -4,7 +4,8 @@ Sandbox repository for my Interdisciplinary Project in an Application Subject.
 
 The "results" os this project will be contributed to [QECirc](https://github.com/qecirc/qecirc-website) and [MQT QECC](https://github.com/munich-quantum-toolkit/qecc).
 
-Beware, as I am at the early stages of this project, everything (including documentation, aka this README) is still in progress and will be refined at a later point in time.
+> [!WARNING]
+> Beware, as I am at the early stages of this project, everything (including documentation, aka this README) is still in progress and will be refined at a later point in time.
 
 
 # Idea
