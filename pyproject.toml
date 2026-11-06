@@ -6,6 +6,8 @@ requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
+    "mqt-ionshuttler==0.3.0",
+    "mqt-qmap==3.11.0",
     "networkx==3.7",
     "numpy==2.5.4",
     "stim==1.16.0",
