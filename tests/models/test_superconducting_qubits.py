@@ -305,6 +305,9 @@ def test_steane_neighborhood_invariants_after_every_gate(topology: dict[int, int
                 if tgt not in neighborhoods[src]:
                     violations.append(("two-qubit gate between non-neighbors", gate))
 
+        def finalize(self) -> None:
+            pass
+
     CircuitAnalyzer(model, InvariantCheck()).run(STEANE_MEASURED)
 
     assert violations == []

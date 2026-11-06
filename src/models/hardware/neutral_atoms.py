@@ -99,6 +99,9 @@ class NeutralAtomsModel(GateProcessor):
             if self.noise_model.two_qubit_gate_noise.gate_name != "I":
                 self.noisy_circuit.append(self.noise_model.two_qubit_gate_noise.gate_name, [src_qubit, tgt_qubit], self.noise_model.two_qubit_gate_noise.gate_arguments)
 
+    def finalize(self) -> None:
+        pass
+    
     def _add_qubit_to_entanglement_pair(self, qubit: int, pair_id: int) -> None:
         if len(self._entanglement_zone[pair_id]) >= 2: 
             lru_qubit = min(self._entanglement_zone[pair_id], key=self._entanglement_zone[pair_id].__getitem__)

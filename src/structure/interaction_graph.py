@@ -22,6 +22,9 @@ class InteractionGraph(GateProcessor):
             self.graph[src][tgt] += 1
             self.graph[tgt][src] += 1
 
+    def finalize(self) -> None:
+        pass
+
     def __repr__(self) -> str:
         nr_edges = sum(len(neighbors) for neighbors in self.graph.values()) // 2
         return f"InteractionGraph(nr_qubits={len(self.graph)}, nr_edges={nr_edges})"

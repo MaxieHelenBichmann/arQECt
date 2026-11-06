@@ -270,6 +270,9 @@ def test_steane_two_qubit_gates_are_executed_within_one_zone(capacity: int, nr_z
                 if zone_of(model, src) is None or zone_of(model, src) != zone_of(model, tgt):
                     split_gates.append(gate)
 
+        def finalize(self) -> None:
+            pass
+
     CircuitAnalyzer(model, CoLocationCheck()).run(STEANE)
 
     assert split_gates == []

@@ -104,6 +104,9 @@ class TrappedIonsModel(GateProcessor):
             if self.noise_model.two_qubit_gate_noise.gate_name != "I":
                 self.noisy_circuit.append(self.noise_model.two_qubit_gate_noise.gate_name, [src_qubit, tgt_qubit], self.noise_model.two_qubit_gate_noise.gate_arguments)
 
+    def finalize(self) -> None:
+        pass
+
     def _choose_zone(self, qubit_count: int) -> int:
         def eviction_cost(zone: dict[int, int]) -> tuple[int, int]:
             nr_evictions = max(0, len(zone) + qubit_count - self.interaction_zone_capacity)

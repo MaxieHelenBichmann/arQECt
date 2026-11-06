@@ -18,12 +18,14 @@ class DAGGate:
     qubits: tuple[int, ...]
     predecessors: set[int] = field(default_factory=set)
     successors: set[int] = field(default_factory=set)
+    schedule_interval: tuple[int | None, int | None] = field(default_factory=lambda: (None, None))  # (asap schedule time, alap schedule time)
 
 class DependencyDAG(GateProcessor):
     """A dependency DAG that tracks the dependencies between gates in a circuit."""
 
     def __init__(self) -> None:
         self.dag: defaultdict[int, DAGGate] = {}
+        self.depth: int = 0
         self._index = 0
 
         self._last_gate: dict[int, int] = {}
@@ -33,10 +35,19 @@ class DependencyDAG(GateProcessor):
         predecessors = {self._last_gate[q] for q in qubits if q in self._last_gate}
         for p in predecessors:
             self.dag[p].successors.add(self._index)
-        self.dag[self._index] = DAGGate(qubits=qubits, predecessors=predecessors)
+
+        asap_time = max([self.dag[p].schedule_interval[0] for p in predecessors]) + 1 if predecessors else 1
+        self.depth = max(self.depth, asap_time)
+
+        self.dag[self._index] = DAGGate(qubits=qubits, predecessors=predecessors, schedule_interval=(asap_time, None))
         for q in qubits:
             self._last_gate[q] = self._index
         self._index += 1
+
+    def finalize(self) -> None:
+        for i in sorted(self.dag.keys(), reverse=True):
+            alap_time = min([self.dag[s].schedule_interval[1] for s in self.dag[i].successors]) - 1 if self.dag[i].successors else self.depth
+            self.dag[i].schedule_interval = (self.dag[i].schedule_interval[0], alap_time)
 
     def __repr__(self) -> str:
         return f"DependencyDAG(nr_gates={len(self.dag)})"

@@ -37,6 +37,9 @@ class QubitTimelines(GateProcessor):
         else:  # single-qubit gate or reset
             self.timelines[qubits[0]].append(TimelineGate("SN"))
 
+    def finalize(self) -> None:
+        pass
+
     def __repr__(self) -> str:
         return f"QubitTimelines(nr_qubits={len(self.timelines)})"
 

@@ -85,6 +85,9 @@ class SuperconductingQubitsModel(GateProcessor):
             if self.noise_model.two_qubit_gate_noise.gate_name != "I":
                 self.noisy_circuit.append(self.noise_model.two_qubit_gate_noise.gate_name, [src_qubit, tgt_qubit], self.noise_model.two_qubit_gate_noise.gate_arguments)
 
+    def finalize(self) -> None:
+        pass
+    
     def _fits(self, grown: tuple[int, ...]) -> bool:
         sizes = sorted((len(n) + grown.count(q) for q, n in self._neighborhoods.items()), reverse=True)
         slots = sorted((d for d, count in self.topology.items() for _ in range(count)), reverse=True)

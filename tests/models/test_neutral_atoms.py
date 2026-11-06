@@ -283,6 +283,9 @@ def test_steane_zone_invariants_after_every_gate(nr_pairs: int, readout_capacity
             if data.produces_measurements and qubits[0] not in model._readout_zone:
                 violations.append(("measurement outside readout zone", gate))
 
+        def finalize(self) -> None:
+            pass
+
     CircuitAnalyzer(model, InvariantCheck()).run(STEANE_MEASURED)
 
     assert violations == []
