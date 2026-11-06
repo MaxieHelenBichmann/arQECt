@@ -14,7 +14,8 @@ class CircuitAnalyzer:
     def __init__(self, *processors: GateProcessor):
         self.processors = processors
 
-    def run(self, circuit: stim.Circuit):
+    def run(self, circuit: stim.Circuit): 
+        """Analyzes a circuit by processing each gate simultaneously with the provided processors."""
         for op in circuit:
             if isinstance(op, stim.CircuitRepeatBlock):
                 raise ValueError("unsupported instruction: REPEAT blocks")
@@ -30,6 +31,6 @@ class CircuitAnalyzer:
                 gate = stim.CircuitInstruction(op.name, group, op.gate_args_copy(), tag=op.tag)
                 for processor in self.processors:
                     processor.process(gate)
-                    
+
         for processor in self.processors:
             processor.finalize()

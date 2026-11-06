@@ -15,6 +15,16 @@ from src.analysis.analyzer import GateProcessor
 from src.models.noise.noise import NoiseModel
 import stim
 
+from dataclasses import dataclass
+
+@dataclass
+class NeutralAtomsHardwareEvents: # no order
+    storage_entanglement: int
+    storage_readout: int
+    entanglement_readout: int
+    inter_entanglement: int
+
+
 # TODO: measurement leaves qubit in readout, how realistic?
 # TODO: does this 1q/2q gate distinction make sense here on this level, bc probably the 2q gates are will be decomposed into 1q and 2q gates during compilation, aka they aren't reused in the ent zone anyway?
 
@@ -30,8 +40,8 @@ class NeutralAtomsModel(GateProcessor):
         self.entanglement_zone_capacity: int = entanglement_zone_capacity
         self.readout_zone_capacity: int = readout_zone_capacity
         self.noise_model: NoiseModel = noise_model
+        self.hardware_events=NeutralAtomsHardwareEvents(storage_entanglement=0, storage_readout=0, entanglement_readout=0, inter_entanglement=0)
 
-        self.hardware_events={"storage_entanglement": 0, "storage_readout": 0, "entanglement_readout": 0, "inter_entanglement": 0} # no order
         self.noisy_circuit: stim.Circuit = stim.Circuit()
 
         # storage zone is implicit: every qubit that is neither in the readout nor in the entanglement zone
@@ -108,17 +118,17 @@ class NeutralAtomsModel(GateProcessor):
             del self._entanglement_zone[pair_id][lru_qubit]
             if self.noise_model.hardware_event_noise.gate_name != "I":
                 self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], self.noise_model.hardware_event_noise.gate_arguments)
-            self.hardware_events["storage_entanglement"] += 1
+            self.hardware_events.storage_entanglement += 1
 
         other_pair = next((p for p in self._entanglement_zone if qubit in p), None)
         if other_pair is not None: # from another pair in the entanglement zone
             del other_pair[qubit]
-            self.hardware_events["inter_entanglement"] += 1
+            self.hardware_events.inter_entanglement += 1
         elif qubit in self._readout_zone:
             del self._readout_zone[qubit]
-            self.hardware_events["entanglement_readout"] += 1
+            self.hardware_events.entanglement_readout += 1
         else:
-            self.hardware_events["storage_entanglement"] += 1
+            self.hardware_events.storage_entanglement += 1
 
         self._entanglement_zone[pair_id][qubit] = self._lru_time_step
         self._lru_time_step += 1
@@ -137,14 +147,14 @@ class NeutralAtomsModel(GateProcessor):
             del self._readout_zone[lru_qubit]
             if self.noise_model.hardware_event_noise.gate_name != "I":
                 self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], self.noise_model.hardware_event_noise.gate_arguments)
-            self.hardware_events["storage_readout"] += 1
+            self.hardware_events.storage_readout += 1
         
         pair = next((p for p in self._entanglement_zone if qubit in p), None)
         if pair is not None:
             del pair[qubit]
-            self.hardware_events["entanglement_readout"] += 1
+            self.hardware_events.entanglement_readout += 1
         else:
-            self.hardware_events["storage_readout"] += 1
+            self.hardware_events.storage_readout += 1
 
         self._readout_zone[qubit] = self._lru_time_step
         self._lru_time_step += 1
@@ -155,10 +165,10 @@ class NeutralAtomsModel(GateProcessor):
         pair = next((p for p in self._entanglement_zone if qubit in p), None)
         if pair is not None:
             del pair[qubit]
-            self.hardware_events["storage_entanglement"] += 1
+            self.hardware_events.storage_entanglement += 1
         elif qubit in self._readout_zone:
             del self._readout_zone[qubit]
-            self.hardware_events["storage_readout"] += 1
+            self.hardware_events.storage_readout += 1
         else:
             return
 

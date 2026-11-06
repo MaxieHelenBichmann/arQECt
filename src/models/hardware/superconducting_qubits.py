@@ -20,6 +20,12 @@ from src.models.noise.noise import NoiseModel
 from src.models.common import GateKind
 import stim
 
+from dataclasses import dataclass
+
+@dataclass
+class SuperconductingQubitsHardwareEvents:
+    virtual_swap: int
+
 class SuperconductingQubitsModel(GateProcessor):
     def __init__(self, number_of_qubits: int, gate_durations: dict[GateKind, float], topology: dict[int, int], noise_model: NoiseModel):
         if number_of_qubits < 1:
@@ -36,7 +42,7 @@ class SuperconductingQubitsModel(GateProcessor):
         self.topology: dict[int, int] = topology  # degree -> max number of qubits with that degree
         self.noise_model: NoiseModel = noise_model
 
-        self.hardware_events={"virtual_swap": 0}
+        self.hardware_events=SuperconductingQubitsHardwareEvents(virtual_swap=0)
         self.noisy_circuit: stim.Circuit = stim.Circuit()
 
         self._neighborhoods: dict[int, dict[int, int]] = {q: {} for q in range(number_of_qubits)}  # qubit -> neighborhood (qubit -> lru_time_step)
@@ -116,7 +122,7 @@ class SuperconductingQubitsModel(GateProcessor):
             other(n): t if n == qubit_b else b_neighborhood.get(n, -1) for n, t in a_neighborhood.items()
         }
 
-        self.hardware_events["virtual_swap"] += 1
+        self.hardware_events.virtual_swap += 1
         if self.noise_model.hardware_event_noise.gate_name != "I":
             self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit_a], self.noise_model.hardware_event_noise.gate_arguments)
             self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit_b], self.noise_model.hardware_event_noise.gate_arguments)

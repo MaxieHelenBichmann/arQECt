@@ -16,17 +16,19 @@ from mqt.qmap.na.zoned import (
 from mqt.qmap.plugins.qiskit.sc import compile_
 from mqt.qmap.sc import Architecture as SCArchitecture, Method
 
+from src.models.hardware import TrappedIonsHardwareEvents, NeutralAtomsHardwareEvents, SuperconductingQubitsHardwareEvents
 
 
-def run_ti_compiler(circuit: stim.Circuit) -> dict[str, object]:
+
+def run_ti_compiler(parameters: dict, circuit: stim.Circuit) -> TrappedIonsHardwareEvents:
     """Run the trapped ion compiler on the given circuit."""
     pass
 
-def run_na_compiler(circuit: stim.Circuit) -> dict[str, object]:
+def run_na_compiler(parameters: dict, circuit: stim.Circuit) -> NeutralAtomsHardwareEvents:
     """Run the neutral atom compiler on the given circuit."""
     pass
 
 
-def run_sc_compiler(circuit: stim.Circuit) -> dict[str, object]:
+def run_sc_compiler(parameters: dict, circuit: stim.Circuit) -> SuperconductingQubitsHardwareEvents:
     """Run the superconducting qubit compiler on the given circuit."""
     pass

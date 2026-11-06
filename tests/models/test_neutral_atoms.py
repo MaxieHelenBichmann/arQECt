@@ -1,3 +1,4 @@
+import dataclasses
 import pathlib
 import random
 
@@ -5,13 +6,13 @@ import pytest
 import stim
 
 from src.analysis.analyzer import CircuitAnalyzer
-from src.models.hardware.neutral_atoms import NeutralAtomsModel
+from src.models.hardware.neutral_atoms import NeutralAtomsModel, NeutralAtomsHardwareEvents
 from src.models.noise.noise import NoiseModel
 
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
 STEANE_MEASURED = STEANE + stim.Circuit("M 0 1 2 3 4 5 6")
 
-NO_EVENTS = {"storage_entanglement": 0, "storage_readout": 0, "entanglement_readout": 0, "inter_entanglement": 0}
+NO_EVENTS = NeutralAtomsHardwareEvents(storage_entanglement=0, storage_readout=0, entanglement_readout=0, inter_entanglement=0)
 
 
 def make_noise_model(
@@ -37,8 +38,8 @@ def run(circuit: str | stim.Circuit, nr_pairs: int, readout_capacity: int, **noi
     return model
 
 
-def events(**counts: int) -> dict[str, int]:
-    return {**NO_EVENTS, **counts}
+def events(**counts: int) -> NeutralAtomsHardwareEvents:
+    return dataclasses.replace(NO_EVENTS, **counts)
 
 
 def pair_of(model: NeutralAtomsModel, qubit: int) -> int | None:
@@ -251,7 +252,7 @@ def test_no_noise_adds_no_identity_instructions():
     circuit = "CX 0 1\nCX 2 3\nM 0\nM 1\nH 0\nCX 0 2"
     model = run(circuit, nr_pairs=1, readout_capacity=1, hardware_event=("None", ()))
 
-    assert model.hardware_events["storage_entanglement"] > 0
+    assert model.hardware_events.storage_entanglement > 0
     assert model.noisy_circuit == stim.Circuit(circuit)
 
 

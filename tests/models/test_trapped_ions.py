@@ -5,7 +5,7 @@ import pytest
 import stim
 
 from src.analysis.analyzer import CircuitAnalyzer
-from src.models.hardware.trapped_ions import TrappedIonsModel
+from src.models.hardware.trapped_ions import TrappedIonsModel, TrappedIonsHardwareEvents
 from src.models.noise.noise import NoiseModel
 
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
@@ -59,7 +59,7 @@ def test_single_qubit_gate_cache_miss_enters_zone():
     model = run("H 0", capacity=2, nr_zones=1)
 
     assert model._zones == ({0: 0},)
-    assert model.hardware_events == {"interaction_zone_entry": 1, "interaction_zone_eviction": 0}
+    assert model.hardware_events == TrappedIonsHardwareEvents(interaction_zone_entry=1, interaction_zone_eviction=0)
     assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nH 0")
 
 
@@ -68,13 +68,13 @@ def test_single_qubit_gate_cache_hit_only_updates_lru_time():
 
     assert model._zones == ({0: 1},)
     assert model._lru_time_step == 2
-    assert model.hardware_events == {"interaction_zone_entry": 1, "interaction_zone_eviction": 0}
+    assert model.hardware_events == TrappedIonsHardwareEvents(interaction_zone_entry=1, interaction_zone_eviction=0)
 
 
 def test_measurements_and_resets_are_handled_as_single_qubit_gates():
     model = run("R 0\nM(0.02) 0\nMR 0\nMX 0", capacity=2, nr_zones=1)
 
-    assert model.hardware_events == {"interaction_zone_entry": 1, "interaction_zone_eviction": 0}
+    assert model.hardware_events == TrappedIonsHardwareEvents(interaction_zone_entry=1, interaction_zone_eviction=0)
     assert without_noise(model.noisy_circuit) == stim.Circuit("R 0\nM(0.02) 0\nMR 0\nMX 0")
 
 
@@ -82,7 +82,7 @@ def test_full_zone_evicts_least_recently_used_qubit():
     model = run("H 0\nH 1\nH 0\nH 2", capacity=2, nr_zones=1)
 
     assert set(model._zones[0]) == {0, 2}
-    assert model.hardware_events == {"interaction_zone_entry": 3, "interaction_zone_eviction": 1}
+    assert model.hardware_events == TrappedIonsHardwareEvents(interaction_zone_entry=3, interaction_zone_eviction=1)
     # stim merges consecutive instructions of the same kind: "DEPOLARIZE1(0.01) 1 2" is eviction of 1, entry of 2
     assert model.noisy_circuit == stim.Circuit(
         "DEPOLARIZE1(0.01) 0\nH 0\nDEPOLARIZE1(0.01) 1\nH 1 0\nDEPOLARIZE1(0.01) 1 2\nH 2"
@@ -104,21 +104,21 @@ def test_two_qubit_gate_cache_miss_puts_both_qubits_in_one_zone():
 
     assert zone_of(model, 0) is not None
     assert zone_of(model, 0) == zone_of(model, 1)
-    assert model.hardware_events == {"interaction_zone_entry": 2, "interaction_zone_eviction": 0}
+    assert model.hardware_events == TrappedIonsHardwareEvents(interaction_zone_entry=2, interaction_zone_eviction=0)
 
 
 def test_two_qubit_gate_cache_hit_in_same_zone_has_no_hardware_events():
     model = run("CX 0 1\nCZ 0 1", capacity=2, nr_zones=1)
 
     assert model._zones == ({0: 2, 1: 3},)
-    assert model.hardware_events == {"interaction_zone_entry": 2, "interaction_zone_eviction": 0}
+    assert model.hardware_events == TrappedIonsHardwareEvents(interaction_zone_entry=2, interaction_zone_eviction=0)
 
 
 def test_two_qubit_gate_partial_cache_hit_moves_uncached_qubit_to_partner():
     model = run("H 0\nCX 0 1", capacity=2, nr_zones=3)
 
     assert zone_of(model, 1) == zone_of(model, 0)
-    assert model.hardware_events == {"interaction_zone_entry": 2, "interaction_zone_eviction": 0}
+    assert model.hardware_events == TrappedIonsHardwareEvents(interaction_zone_entry=2, interaction_zone_eviction=0)
 
 
 def test_two_qubit_gate_in_different_zones_moves_target_to_source():
@@ -130,7 +130,7 @@ def test_two_qubit_gate_in_different_zones_moves_target_to_source():
     model.process(stim.CircuitInstruction("CX", [0, 1]))
 
     assert model._zones == ({0: 2, 1: 3}, {})  # source is touched before the target enters
-    assert model.hardware_events == {"interaction_zone_entry": 1, "interaction_zone_eviction": 1}
+    assert model.hardware_events == TrappedIonsHardwareEvents(interaction_zone_entry=1, interaction_zone_eviction=1)
 
 
 def test_two_qubit_gate_is_appended_to_noisy_circuit():
@@ -230,7 +230,7 @@ def test_no_hardware_event_noise_adds_no_identity_instructions():
     # capacity 2 with 3 qubits forces entries and evictions
     model = run("H 0\nH 1\nH 2\nCX 0 1", capacity=2, nr_zones=1, hardware_event=("None", ()))
 
-    assert model.hardware_events["interaction_zone_eviction"] > 0
+    assert model.hardware_events.interaction_zone_eviction > 0
     assert model.noisy_circuit == stim.Circuit("H 0 1 2\nCX 0 1")
 
 
@@ -241,7 +241,7 @@ def test_steane_without_capacity_pressure_enters_every_qubit_once():
     model = run(STEANE, capacity=7, nr_zones=1)
 
     assert set(model._zones[0]) == set(range(7))
-    assert model.hardware_events == {"interaction_zone_entry": 7, "interaction_zone_eviction": 0}
+    assert model.hardware_events == TrappedIonsHardwareEvents(interaction_zone_entry=7, interaction_zone_eviction=0)
 
 
 @pytest.mark.parametrize("capacity, nr_zones", [(2, 1), (2, 3), (3, 2), (4, 2), (7, 3)])
@@ -254,8 +254,8 @@ def test_steane_zone_invariants(capacity: int, nr_zones: int, seed: int):
     assert len(qubits_in_zones) == len(set(qubits_in_zones))  # every qubit in at most one zone
     assert all(len(zone) <= capacity for zone in model._zones)
     events = model.hardware_events
-    assert events["interaction_zone_entry"] - events["interaction_zone_eviction"] == len(qubits_in_zones)
-    assert events["interaction_zone_entry"] >= 7  # every qubit enters at least once
+    assert events.interaction_zone_entry - events.interaction_zone_eviction == len(qubits_in_zones)
+    assert events.interaction_zone_entry >= 7  # every qubit enters at least once
 
 
 @pytest.mark.parametrize("capacity, nr_zones", [(2, 1), (3, 3), (4, 2), (7, 1), (7, 3)])
