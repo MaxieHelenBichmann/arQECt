@@ -20,6 +20,8 @@ def run() -> None:
     concrete_hardware_events = run_ti_compiler(parameters=parameters, circuit=circuit)
 
     # TODO: "extract" hardware events from both and compare them
+    # A) How well do i approximate the actual recorded hardware events with my abstract execution (eg IZ crossings)
+    # B) How good of a proxy are these recorded hardware events (eg IZ crossings) to the actual relevant metric (eg shuttling operations)
     print(abstract_hardware_events)
     print()
     print(concrete_hardware_events)
