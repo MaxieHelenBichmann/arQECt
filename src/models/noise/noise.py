@@ -156,3 +156,9 @@ class NoiseModel:
             idle_noise=IdleMapping[idle[0]](idle[1]),
             hardware_event_noise=PauliMapping[hardware_event[0]](hardware_event[1], 1)
         )
+
+    @classmethod
+    def empty(cls) -> NoiseModel:
+        """Build an empty noise model, meaning each error channel is the identity channel."""
+        return cls.from_specs()
+
