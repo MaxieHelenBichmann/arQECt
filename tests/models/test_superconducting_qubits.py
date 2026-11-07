@@ -48,7 +48,7 @@ def run(
 def idle(model: SuperconductingQubitsModel, qubit: int, time: float) -> stim.Circuit:
     channel = model.noise_model.idle_noise(time)
     circuit = stim.Circuit()
-    circuit.append(channel.gate_name, [qubit], channel.gate_arguments)
+    circuit.append(stim.CircuitInstruction(channel.gate_name, [qubit], channel.gate_arguments, tag="idle"))
     return circuit
 
 
@@ -253,7 +253,7 @@ def test_swap_noise_is_applied_to_both_swapped_qubits_before_the_gate():
 
     expected = stim.Circuit("CX 0 1")
     expected += idle(model, 2, DURATIONS["EN"])
-    expected += stim.Circuit("DEPOLARIZE1(0.01) 1 2\nCX 0 2")
+    expected += stim.Circuit("DEPOLARIZE1[hw](0.01) 1 2\nCX 0 2")
     assert model.noisy_circuit == expected
 
 
@@ -268,10 +268,10 @@ def test_gate_reset_measurement_and_two_qubit_noise():
         reset=("BitFlip", (0.02,)),
     )
 
-    assert without_noise(model.noisy_circuit) == stim.Circuit("R 0\nH 0\nCX 0 1\nM(0.03) 0")
-    assert "X_ERROR(0.02) 0" in str(model.noisy_circuit)
-    assert "DEPOLARIZE1(0.001) 0" in str(model.noisy_circuit)
-    assert "DEPOLARIZE2(0.005) 0 1" in str(model.noisy_circuit)
+    assert without_noise(model.noisy_circuit) == stim.Circuit("R 0\nH 0\nCX 0 1\nM[meas](0.03) 0")
+    assert "X_ERROR[reset](0.02) 0" in str(model.noisy_circuit)
+    assert "DEPOLARIZE1[1q](0.001) 0" in str(model.noisy_circuit)
+    assert "DEPOLARIZE2[2q](0.005) 0 1" in str(model.noisy_circuit)
 
 
 def test_no_hardware_event_noise_adds_no_identity_instructions():

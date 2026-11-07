@@ -60,7 +60,7 @@ def test_single_qubit_gate_cache_miss_enters_zone():
 
     assert model._zones == ({0: 0},)
     assert model.hardware_events == TrappedIonsHardwareEvents(interaction_zone_entry=1, interaction_zone_eviction=0)
-    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nH 0")
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0\nH 0")
 
 
 def test_single_qubit_gate_cache_hit_only_updates_lru_time():
@@ -83,9 +83,9 @@ def test_full_zone_evicts_least_recently_used_qubit():
 
     assert set(model._zones[0]) == {0, 2}
     assert model.hardware_events == TrappedIonsHardwareEvents(interaction_zone_entry=3, interaction_zone_eviction=1)
-    # stim merges consecutive instructions of the same kind: "DEPOLARIZE1(0.01) 1 2" is eviction of 1, entry of 2
+    # stim merges consecutive instructions of the same kind: "DEPOLARIZE1[hw](0.01) 1 2" is eviction of 1, entry of 2
     assert model.noisy_circuit == stim.Circuit(
-        "DEPOLARIZE1(0.01) 0\nH 0\nDEPOLARIZE1(0.01) 1\nH 1 0\nDEPOLARIZE1(0.01) 1 2\nH 2"
+        "DEPOLARIZE1[hw](0.01) 0\nH 0\nDEPOLARIZE1[hw](0.01) 1\nH 1 0\nDEPOLARIZE1[hw](0.01) 1 2\nH 2"
     )
 
 
@@ -181,25 +181,25 @@ def test_choose_zone_for_two_qubits_prefers_zones_with_one_spot_left():
 def test_hardware_event_noise_with_multiple_arguments():
     model = run("H 0", capacity=2, nr_zones=1, hardware_event=("Pauli", (0.01, 0.02, 0.03)))
 
-    assert model.noisy_circuit == stim.Circuit("PAULI_CHANNEL_1(0.01, 0.02, 0.03) 0\nH 0")
+    assert model.noisy_circuit == stim.Circuit("PAULI_CHANNEL_1[hw](0.01, 0.02, 0.03) 0\nH 0")
 
 
 def test_single_qubit_gate_noise_is_applied_after_the_gate():
     model = run("H 0", capacity=2, nr_zones=1, single_qubit_gate=("Depolarize", (0.001,)))
 
-    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nH 0\nDEPOLARIZE1(0.001) 0")
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0\nH 0\nDEPOLARIZE1[1q](0.001) 0")
 
 
 def test_reset_noise_is_applied_after_the_reset():
     model = run("R 0", capacity=2, nr_zones=1, reset=("BitFlip", (0.02,)))
 
-    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nR 0\nX_ERROR(0.02) 0")
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0\nR 0\nX_ERROR[reset](0.02) 0")
 
 
 def test_measurement_noise_is_the_flip_probability_of_the_measurement_in_its_basis():
     model = run("M 0\nMX 0\nMR 0", capacity=2, nr_zones=1, measurement=("Measurement", (0.03,)))
 
-    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nM(0.03) 0\nMX(0.03) 0\nMR(0.03) 0")
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0\nM[meas](0.03) 0\nMX[meas](0.03) 0\nMR[meas](0.03) 0")
 
 
 def test_measurement_noise_flips_the_measurement_result():
@@ -211,19 +211,19 @@ def test_measurement_noise_flips_the_measurement_result():
 def test_measurement_without_measurement_noise_keeps_its_own_arguments():
     model = run("M(0.02) 0", capacity=2, nr_zones=1)
 
-    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nM(0.02) 0")
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0\nM(0.02) 0")
 
 
 def test_two_qubit_gate_noise_is_applied_to_both_qubits_after_the_gate():
     model = run("CX 0 1", capacity=2, nr_zones=1, two_qubit_gate=("Depolarize", (0.005,)))
 
-    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0 1\nCX 0 1\nDEPOLARIZE2(0.005) 0 1")
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0 1\nCX 0 1\nDEPOLARIZE2[2q](0.005) 0 1")
 
 
 def test_no_gate_noise_adds_no_identity_instructions():
     model = run("R 0\nH 0\nCX 0 1\nM 0", capacity=2, nr_zones=1)
 
-    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nR 0\nH 0\nDEPOLARIZE1(0.01) 1\nCX 0 1\nM 0")
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0\nR 0\nH 0\nDEPOLARIZE1[hw](0.01) 1\nCX 0 1\nM 0")
 
 
 def test_no_hardware_event_noise_adds_no_identity_instructions():

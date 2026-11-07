@@ -12,8 +12,9 @@ Different hardware-architectures can be modeled by varying the capacity of the z
 """
 import random
 from src.analysis.analyzer import GateProcessor
-from src.models.noise.noise import NoiseModel
+from src.models.noise.noise import ErrorChannel, NoiseModel
 import stim
+from src.models.common import NoiseTag
 
 from dataclasses import dataclass
 
@@ -59,16 +60,18 @@ class NeutralAtomsModel(GateProcessor):
             if data.produces_measurements:
                 self._add_to_readout_zone(qubit)
 
-                self.noisy_circuit.append(gate.name, gate.targets_copy(), self.noise_model.measurement_noise.gate_arguments or gate.gate_args_copy())
+                if self.noise_model.measurement_noise.gate_arguments:
+                    self.noisy_circuit.append(stim.CircuitInstruction(gate.name, gate.targets_copy(), self.noise_model.measurement_noise.gate_arguments, tag="meas"))
+                else:
+                    self.noisy_circuit.append(gate)
             else:
                 self._add_to_storage_zone(qubit)
 
                 self.noisy_circuit.append(gate)
                 if data.is_reset:
-                    if self.noise_model.reset_noise.gate_name != "I":
-                        self.noisy_circuit.append(self.noise_model.reset_noise.gate_name, [qubit], self.noise_model.reset_noise.gate_arguments)
-                elif self.noise_model.single_qubit_gate_noise.gate_name != "I":
-                    self.noisy_circuit.append(self.noise_model.single_qubit_gate_noise.gate_name, [qubit], self.noise_model.single_qubit_gate_noise.gate_arguments)
+                    self._add_noise(self.noise_model.reset_noise, [qubit], "reset")
+                else:
+                    self._add_noise(self.noise_model.single_qubit_gate_noise, [qubit], "1q")
 
         elif stim.gate_data(gate.name).is_two_qubit_gate:
             src_qubit = gate.targets_copy()[0].value
@@ -106,8 +109,7 @@ class NeutralAtomsModel(GateProcessor):
                 self._add_qubit_to_entanglement_pair(tgt_qubit, pair_id)
 
             self.noisy_circuit.append(gate)
-            if self.noise_model.two_qubit_gate_noise.gate_name != "I":
-                self.noisy_circuit.append(self.noise_model.two_qubit_gate_noise.gate_name, [src_qubit, tgt_qubit], self.noise_model.two_qubit_gate_noise.gate_arguments)
+            self._add_noise(self.noise_model.two_qubit_gate_noise, [src_qubit, tgt_qubit], "2q")
 
     def finalize(self) -> None:
         pass
@@ -116,8 +118,7 @@ class NeutralAtomsModel(GateProcessor):
         if len(self._entanglement_zone[pair_id]) >= 2: 
             lru_qubit = min(self._entanglement_zone[pair_id], key=self._entanglement_zone[pair_id].__getitem__)
             del self._entanglement_zone[pair_id][lru_qubit]
-            if self.noise_model.hardware_event_noise.gate_name != "I":
-                self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], self.noise_model.hardware_event_noise.gate_arguments)
+            self._add_noise(self.noise_model.hardware_event_noise, [lru_qubit], "hw")
             self.hardware_events.storage_entanglement += 1
 
         other_pair = next((p for p in self._entanglement_zone if qubit in p), None)
@@ -133,8 +134,7 @@ class NeutralAtomsModel(GateProcessor):
         self._entanglement_zone[pair_id][qubit] = self._lru_time_step
         self._lru_time_step += 1
 
-        if self.noise_model.hardware_event_noise.gate_name != "I":
-            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
+        self._add_noise(self.noise_model.hardware_event_noise, [qubit], "hw")
 
     def _add_to_readout_zone(self, qubit: int) -> None:
         if qubit in self._readout_zone:
@@ -145,8 +145,7 @@ class NeutralAtomsModel(GateProcessor):
         if len(self._readout_zone) >= self.readout_zone_capacity:
             lru_qubit = min(self._readout_zone, key=self._readout_zone.__getitem__)
             del self._readout_zone[lru_qubit]
-            if self.noise_model.hardware_event_noise.gate_name != "I":
-                self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [lru_qubit], self.noise_model.hardware_event_noise.gate_arguments)
+            self._add_noise(self.noise_model.hardware_event_noise, [lru_qubit], "hw")
             self.hardware_events.storage_readout += 1
         
         pair = next((p for p in self._entanglement_zone if qubit in p), None)
@@ -158,8 +157,7 @@ class NeutralAtomsModel(GateProcessor):
 
         self._readout_zone[qubit] = self._lru_time_step
         self._lru_time_step += 1
-        if self.noise_model.hardware_event_noise.gate_name != "I":
-            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
+        self._add_noise(self.noise_model.hardware_event_noise, [qubit], "hw")
 
     def _add_to_storage_zone(self, qubit: int) -> None:
         pair = next((p for p in self._entanglement_zone if qubit in p), None)
@@ -172,8 +170,7 @@ class NeutralAtomsModel(GateProcessor):
         else:
             return
 
-        if self.noise_model.hardware_event_noise.gate_name != "I":
-            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit], self.noise_model.hardware_event_noise.gate_arguments)
+        self._add_noise(self.noise_model.hardware_event_noise, [qubit], "hw")
 
     def _choose_pair(self) -> int:
         def eviction_cost(pair: dict[int, int]) -> tuple[int, int]:
@@ -185,6 +182,10 @@ class NeutralAtomsModel(GateProcessor):
         minimal_pairs = [i for i, cost in enumerate(costs) if cost == minimal_cost]
 
         return random.choice(minimal_pairs)
+
+    def _add_noise(self, channel: ErrorChannel, qubits: list[int], tag: NoiseTag) -> None:
+        if channel.gate_name != "I":
+            self.noisy_circuit.append(stim.CircuitInstruction(channel.gate_name, qubits, channel.gate_arguments, tag=tag))
 
     def __repr__(self) -> str:
         return (

@@ -16,8 +16,8 @@ Different hardware-architectures can be modeled by varying the available qubit d
     
 import random
 from src.analysis.analyzer import GateProcessor
-from src.models.noise.noise import NoiseModel
-from src.models.common import GateKind
+from src.models.noise.noise import ErrorChannel, NoiseModel
+from src.models.common import GateKind, NoiseTag
 import stim
 
 from dataclasses import dataclass
@@ -56,15 +56,17 @@ class SuperconductingQubitsModel(GateProcessor):
             data = stim.gate_data(gate.name)
             if data.produces_measurements:
                 self._update_idle_noise(self.gate_durations["MS"], qubit)
-                self.noisy_circuit.append(gate.name, gate.targets_copy(), self.noise_model.measurement_noise.gate_arguments or gate.gate_args_copy())
+                if self.noise_model.measurement_noise.gate_arguments:
+                    self.noisy_circuit.append(stim.CircuitInstruction(gate.name, gate.targets_copy(), self.noise_model.measurement_noise.gate_arguments, tag="meas"))
+                else:
+                    self.noisy_circuit.append(gate)
             else:
                 self._update_idle_noise(self.gate_durations["SN"], qubit)
                 self.noisy_circuit.append(gate)
                 if data.is_reset:
-                    if self.noise_model.reset_noise.gate_name != "I":
-                        self.noisy_circuit.append(self.noise_model.reset_noise.gate_name, [qubit], self.noise_model.reset_noise.gate_arguments)
-                elif self.noise_model.single_qubit_gate_noise.gate_name != "I":
-                    self.noisy_circuit.append(self.noise_model.single_qubit_gate_noise.gate_name, [qubit], self.noise_model.single_qubit_gate_noise.gate_arguments)
+                    self._add_noise(self.noise_model.reset_noise, [qubit], "reset")
+                else:
+                    self._add_noise(self.noise_model.single_qubit_gate_noise, [qubit], "1q")
 
         if stim.gate_data(gate.name).is_two_qubit_gate:
             src_qubit = gate.targets_copy()[0].value
@@ -88,8 +90,7 @@ class SuperconductingQubitsModel(GateProcessor):
             self._lru_time_step += 1
 
             self.noisy_circuit.append(gate)
-            if self.noise_model.two_qubit_gate_noise.gate_name != "I":
-                self.noisy_circuit.append(self.noise_model.two_qubit_gate_noise.gate_name, [src_qubit, tgt_qubit], self.noise_model.two_qubit_gate_noise.gate_arguments)
+            self._add_noise(self.noise_model.two_qubit_gate_noise, [src_qubit, tgt_qubit], "2q")
 
     def finalize(self) -> None:
         pass
@@ -123,23 +124,24 @@ class SuperconductingQubitsModel(GateProcessor):
         }
 
         self.hardware_events.virtual_swap += 1
-        if self.noise_model.hardware_event_noise.gate_name != "I":
-            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit_a], self.noise_model.hardware_event_noise.gate_arguments)
-            self.noisy_circuit.append(self.noise_model.hardware_event_noise.gate_name, [qubit_b], self.noise_model.hardware_event_noise.gate_arguments)
+        self._add_noise(self.noise_model.hardware_event_noise, [qubit_a], "hw")
+        self._add_noise(self.noise_model.hardware_event_noise, [qubit_b], "hw")
 
     def _update_idle_noise(self, duration: float, *qubits: int) -> None:
         for q in qubits:
             idle_time = self._idle_time_steps[q]
             if idle_time > 0:
-                channel = self.noise_model.idle_noise(idle_time)
-                if channel.gate_name != "I":
-                    self.noisy_circuit.append(channel.gate_name, [q], channel.gate_arguments)
+                self._add_noise(self.noise_model.idle_noise(idle_time), [q], "idle")
 
         for q in self._idle_time_steps.keys():
             if q in qubits:
                 self._idle_time_steps[q] = 0
             else:
                 self._idle_time_steps[q] += duration
+
+    def _add_noise(self, channel: ErrorChannel, qubits: list[int], tag: NoiseTag) -> None:
+        if channel.gate_name != "I":
+            self.noisy_circuit.append(stim.CircuitInstruction(channel.gate_name, qubits, channel.gate_arguments, tag=tag))
 
     def __repr__(self) -> str:
         return (

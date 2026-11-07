@@ -84,7 +84,7 @@ def test_measurement_moves_qubit_from_storage_to_readout():
 
     assert model._readout_zone == {0: 0}
     assert model.hardware_events == events(storage_readout=1)
-    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nM 0")
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0\nM 0")
 
 
 def test_repeated_measurement_is_a_readout_cache_hit():
@@ -117,7 +117,7 @@ def test_two_qubit_gate_cache_miss_moves_both_qubits_into_one_pair():
     assert pair_of(model, 0) is not None
     assert pair_of(model, 0) == pair_of(model, 1)
     assert model.hardware_events == events(storage_entanglement=2)
-    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0 1\nCX 0 1")
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0 1\nCX 0 1")
 
 
 def test_two_qubit_gate_cache_hit_in_same_pair_has_no_hardware_events():
@@ -226,25 +226,25 @@ def test_single_qubit_gate_and_reset_noise_are_applied_after_the_gate():
         reset=("BitFlip", (0.02,)),
     )
 
-    assert model.noisy_circuit == stim.Circuit("R 0\nX_ERROR(0.02) 0\nH 0\nDEPOLARIZE1(0.001) 0")
+    assert model.noisy_circuit == stim.Circuit("R 0\nX_ERROR[reset](0.02) 0\nH 0\nDEPOLARIZE1[1q](0.001) 0")
 
 
 def test_measurement_noise_is_the_flip_probability_of_the_measurement_in_its_basis():
     model = run("M 0\nMX 0", nr_pairs=1, readout_capacity=1, measurement=("Measurement", (0.03,)))
 
-    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0\nM(0.03) 0\nMX(0.03) 0")
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0\nM[meas](0.03) 0\nMX[meas](0.03) 0")
 
 
 def test_two_qubit_gate_noise_is_applied_to_both_qubits_after_the_gate():
     model = run("CX 0 1", nr_pairs=1, readout_capacity=1, two_qubit_gate=("Depolarize", (0.005,)))
 
-    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1(0.01) 0 1\nCX 0 1\nDEPOLARIZE2(0.005) 0 1")
+    assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0 1\nCX 0 1\nDEPOLARIZE2[2q](0.005) 0 1")
 
 
 def test_hardware_event_noise_with_multiple_arguments():
     model = run("M 0", nr_pairs=1, readout_capacity=1, hardware_event=("Pauli", (0.01, 0.02, 0.03)))
 
-    assert model.noisy_circuit == stim.Circuit("PAULI_CHANNEL_1(0.01, 0.02, 0.03) 0\nM 0")
+    assert model.noisy_circuit == stim.Circuit("PAULI_CHANNEL_1[hw](0.01, 0.02, 0.03) 0\nM 0")
 
 
 def test_no_noise_adds_no_identity_instructions():
