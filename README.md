@@ -87,4 +87,5 @@ uv run python -m bm.performance.runner
 
 ## AI Transparency
 I used AI to set up DevEnvironment, aka uv, CI, license etc.
-only tests are Ai generated until now, will be adapted later
+only tests are Ai generated until now, will be adapted later.
+I also used AI to use the other MQT compilers, aka tell me how i could extract the metrics that i needed for my hw model evaluation.
