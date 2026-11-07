@@ -15,16 +15,17 @@ Different hardware-architectures can be modeled by varying the available qubit d
 # TODO: potentially replace this implementation with a interaction graph based one and a greedy static layout
     
 import random
+from collections import defaultdict
 from src.analysis.analyzer import GateProcessor
 from src.models.noise.noise import ErrorChannel, NoiseModel
-from src.models.common import GateKind, NoiseTag
+from src.models.common import GateKind, HardwareEventLocation, NoiseTag
 import stim
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class SuperconductingQubitsHardwareEvents:
-    virtual_swap: int
+    virtual_swap: list[tuple[HardwareEventLocation, HardwareEventLocation]] = field(default_factory=list)
 
 class SuperconductingQubitsModel(GateProcessor):
     def __init__(self, number_of_qubits: int, gate_durations: dict[GateKind, float], topology: dict[int, int], noise_model: NoiseModel):
@@ -42,8 +43,10 @@ class SuperconductingQubitsModel(GateProcessor):
         self.topology: dict[int, int] = topology  # degree -> max number of qubits with that degree
         self.noise_model: NoiseModel = noise_model
 
-        self.hardware_events=SuperconductingQubitsHardwareEvents(virtual_swap=0)
+        self.hardware_events: SuperconductingQubitsHardwareEvents = SuperconductingQubitsHardwareEvents()
         self.noisy_circuit: stim.Circuit = stim.Circuit()
+
+        self._qubit_steps: defaultdict[int, int] = defaultdict(int) # qubit -> number of completed anchor operations
 
         self._neighborhoods: dict[int, dict[int, int]] = {q: {} for q in range(number_of_qubits)}  # qubit -> neighborhood (qubit -> lru_time_step)
         self._lru_time_step: int = 0
@@ -68,6 +71,9 @@ class SuperconductingQubitsModel(GateProcessor):
                 else:
                     self._add_noise(self.noise_model.single_qubit_gate_noise, [qubit], "1q")
 
+            if data.produces_measurements or data.is_reset:
+                self._qubit_steps[qubit] += 1
+
         if stim.gate_data(gate.name).is_two_qubit_gate:
             src_qubit = gate.targets_copy()[0].value
             tgt_qubit = gate.targets_copy()[1].value
@@ -91,6 +97,9 @@ class SuperconductingQubitsModel(GateProcessor):
 
             self.noisy_circuit.append(gate)
             self._add_noise(self.noise_model.two_qubit_gate_noise, [src_qubit, tgt_qubit], "2q")
+
+            self._qubit_steps[src_qubit] += 1
+            self._qubit_steps[tgt_qubit] += 1
 
     def finalize(self) -> None:
         pass
@@ -123,7 +132,7 @@ class SuperconductingQubitsModel(GateProcessor):
             other(n): t if n == qubit_b else b_neighborhood.get(n, -1) for n, t in a_neighborhood.items()
         }
 
-        self.hardware_events.virtual_swap += 1
+        self.hardware_events.virtual_swap.append(((qubit_a, self._qubit_steps[qubit_a]), (qubit_b, self._qubit_steps[qubit_b])))
         self._add_noise(self.noise_model.hardware_event_noise, [qubit_a], "hw")
         self._add_noise(self.noise_model.hardware_event_noise, [qubit_b], "hw")
 

@@ -12,7 +12,7 @@ from src.models.noise.noise import NoiseModel
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
 STEANE_MEASURED = STEANE + stim.Circuit("M 0 1 2 3 4 5 6")
 
-NO_EVENTS = NeutralAtomsHardwareEvents(storage_entanglement=0, storage_readout=0, entanglement_readout=0, inter_entanglement=0)
+NO_EVENTS = {f.name: 0 for f in dataclasses.fields(NeutralAtomsHardwareEvents)}
 
 
 def make_noise_model(
@@ -38,8 +38,14 @@ def run(circuit: str | stim.Circuit, nr_pairs: int, readout_capacity: int, **noi
     return model
 
 
-def events(**counts: int) -> NeutralAtomsHardwareEvents:
-    return dataclasses.replace(NO_EVENTS, **counts)
+def events(**counts: int) -> dict[str, int]:
+    """expected number of hardware events per kind, all other kinds 0"""
+    return NO_EVENTS | counts
+
+
+def nr_events(model: NeutralAtomsModel) -> dict[str, int]:
+    """number of hardware events per kind"""
+    return {f.name: len(getattr(model.hardware_events, f.name)) for f in dataclasses.fields(model.hardware_events)}
 
 
 def pair_of(model: NeutralAtomsModel, qubit: int) -> int | None:
@@ -75,7 +81,7 @@ def test_invalid_capacities_are_rejected(nr_pairs: int, readout_capacity: int):
 def test_single_qubit_gates_and_resets_in_storage_cause_no_hardware_events():
     model = run("R 0\nH 0\nS 0", nr_pairs=1, readout_capacity=1)
 
-    assert model.hardware_events == NO_EVENTS
+    assert nr_events(model) == NO_EVENTS
     assert model.noisy_circuit == stim.Circuit("R 0\nH 0\nS 0")
 
 
@@ -83,7 +89,7 @@ def test_measurement_moves_qubit_from_storage_to_readout():
     model = run("M 0", nr_pairs=1, readout_capacity=1)
 
     assert model._readout_zone == {0: 0}
-    assert model.hardware_events == events(storage_readout=1)
+    assert nr_events(model) == events(storage_readout=1)
     assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0\nM 0")
 
 
@@ -91,21 +97,21 @@ def test_repeated_measurement_is_a_readout_cache_hit():
     model = run("M 0\nMX 0", nr_pairs=1, readout_capacity=1)
 
     assert model._readout_zone == {0: 1}
-    assert model.hardware_events == events(storage_readout=1)
+    assert nr_events(model) == events(storage_readout=1)
 
 
 def test_single_qubit_gate_after_measurement_moves_qubit_back_to_storage():
     model = run("M 0\nH 0", nr_pairs=1, readout_capacity=1)
 
     assert model._readout_zone == {}
-    assert model.hardware_events == events(storage_readout=2)
+    assert nr_events(model) == events(storage_readout=2)
 
 
 def test_full_readout_zone_evicts_least_recently_used_qubit():
     model = run("M 0\nM 1\nM 0\nM 2", nr_pairs=1, readout_capacity=2)
 
     assert set(model._readout_zone) == {0, 2}
-    assert model.hardware_events == events(storage_readout=4)  # 3 entries, 1 eviction of qubit 1
+    assert nr_events(model) == events(storage_readout=4)  # 3 entries, 1 eviction of qubit 1
 
 
 # ---------------------------------------------------------------- two-qubit gates and entanglement zone
@@ -116,7 +122,7 @@ def test_two_qubit_gate_cache_miss_moves_both_qubits_into_one_pair():
 
     assert pair_of(model, 0) is not None
     assert pair_of(model, 0) == pair_of(model, 1)
-    assert model.hardware_events == events(storage_entanglement=2)
+    assert nr_events(model) == events(storage_entanglement=2)
     assert model.noisy_circuit == stim.Circuit("DEPOLARIZE1[hw](0.01) 0 1\nCX 0 1")
 
 
@@ -124,14 +130,14 @@ def test_two_qubit_gate_cache_hit_in_same_pair_has_no_hardware_events():
     model = run("CX 0 1\nCZ 0 1", nr_pairs=1, readout_capacity=1)
 
     assert model._entanglement_zone == ({0: 2, 1: 3},)
-    assert model.hardware_events == events(storage_entanglement=2)
+    assert nr_events(model) == events(storage_entanglement=2)
 
 
 def test_two_qubit_gate_cache_miss_in_full_pair_evicts_both_qubits_to_storage():
     model = run("CX 0 1\nCX 2 3", nr_pairs=1, readout_capacity=1)
 
     assert set(model._entanglement_zone[0]) == {2, 3}
-    assert model.hardware_events == events(storage_entanglement=6)  # 4 entries, 2 evictions
+    assert nr_events(model) == events(storage_entanglement=6)  # 4 entries, 2 evictions
 
 
 def test_two_qubit_gate_partial_cache_hit_evicts_the_other_qubit_not_the_partner():
@@ -139,7 +145,7 @@ def test_two_qubit_gate_partial_cache_hit_evicts_the_other_qubit_not_the_partner
     model = run("CX 0 1\nCX 0 2", nr_pairs=1, readout_capacity=1)
 
     assert set(model._entanglement_zone[0]) == {0, 2}
-    assert model.hardware_events == events(storage_entanglement=4)  # 3 entries, 1 eviction of qubit 1
+    assert nr_events(model) == events(storage_entanglement=4)  # 3 entries, 1 eviction of qubit 1
 
 
 def test_two_qubit_gate_in_different_pairs_moves_target_to_source_pair():
@@ -151,7 +157,7 @@ def test_two_qubit_gate_in_different_pairs_moves_target_to_source_pair():
     model.process(stim.CircuitInstruction("CX", [0, 1]))
 
     assert model._entanglement_zone == ({0: 2, 1: 3}, {})
-    assert model.hardware_events == events(inter_entanglement=1)
+    assert nr_events(model) == events(inter_entanglement=1)
 
 
 def test_two_qubit_gate_in_different_pairs_evicts_from_full_source_pair():
@@ -163,14 +169,14 @@ def test_two_qubit_gate_in_different_pairs_evicts_from_full_source_pair():
     model.process(stim.CircuitInstruction("CX", [0, 1]))
 
     assert model._entanglement_zone == ({0: 3, 1: 4}, {})
-    assert model.hardware_events == events(inter_entanglement=1, storage_entanglement=1)  # eviction of qubit 5
+    assert nr_events(model) == events(inter_entanglement=1, storage_entanglement=1)  # eviction of qubit 5
 
 
 def test_qubit_moves_from_readout_to_entanglement_zone():
     model = run("M 0\nCX 0 1", nr_pairs=1, readout_capacity=1)
 
     assert model._readout_zone == {}
-    assert model.hardware_events == events(storage_readout=1, entanglement_readout=1, storage_entanglement=1)
+    assert nr_events(model) == events(storage_readout=1, entanglement_readout=1, storage_entanglement=1)
 
 
 def test_qubit_moves_from_entanglement_to_readout_zone():
@@ -178,14 +184,14 @@ def test_qubit_moves_from_entanglement_to_readout_zone():
 
     assert set(model._entanglement_zone[0]) == {1}
     assert set(model._readout_zone) == {0}
-    assert model.hardware_events == events(storage_entanglement=2, entanglement_readout=1)
+    assert nr_events(model) == events(storage_entanglement=2, entanglement_readout=1)
 
 
 def test_single_qubit_gate_moves_qubit_from_entanglement_back_to_storage():
     model = run("CX 0 1\nH 0", nr_pairs=1, readout_capacity=1)
 
     assert set(model._entanglement_zone[0]) == {1}
-    assert model.hardware_events == events(storage_entanglement=3)
+    assert nr_events(model) == events(storage_entanglement=3)
 
 
 # ---------------------------------------------------------------- pair choice
@@ -252,7 +258,7 @@ def test_no_noise_adds_no_identity_instructions():
     circuit = "CX 0 1\nCX 2 3\nM 0\nM 1\nH 0\nCX 0 2"
     model = run(circuit, nr_pairs=1, readout_capacity=1, hardware_event=("None", ()))
 
-    assert model.hardware_events.storage_entanglement > 0
+    assert model.hardware_events.storage_entanglement
     assert model.noisy_circuit == stim.Circuit(circuit)
 
 

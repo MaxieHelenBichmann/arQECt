@@ -6,7 +6,7 @@ import stim
 
 from src.analysis.analyzer import CircuitAnalyzer
 from src.models.common import GateKind
-from src.models.hardware.superconducting_qubits import SuperconductingQubitsModel, SuperconductingQubitsHardwareEvents
+from src.models.hardware.superconducting_qubits import SuperconductingQubitsModel
 from src.models.noise.noise import NoiseModel
 
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
@@ -90,7 +90,7 @@ def test_single_qubit_gates_measurements_and_resets_do_not_change_neighborhoods(
     model = run("R 0\nH 0\nM 0\nMR 1", 2, {1: 2})
 
     assert model._neighborhoods == {0: {}, 1: {}}
-    assert model.hardware_events == SuperconductingQubitsHardwareEvents(virtual_swap=0)
+    assert len(model.hardware_events.virtual_swap) == 0
 
 
 # ---------------------------------------------------------------- two-qubit gates and neighborhoods
@@ -100,14 +100,14 @@ def test_two_qubit_gate_with_room_connects_qubits_without_swap():
     model = run("CX 0 1", 3, {1: 3})
 
     assert model._neighborhoods == {0: {1: 0}, 1: {0: 0}, 2: {}}
-    assert model.hardware_events == SuperconductingQubitsHardwareEvents(virtual_swap=0)
+    assert len(model.hardware_events.virtual_swap) == 0
 
 
 def test_two_qubit_gate_cache_hit_refreshes_lru_time_independent_of_direction():
     model = run("CX 0 1\nCZ 1 0", 2, {1: 2})
 
     assert model._neighborhoods == {0: {1: 1}, 1: {0: 1}}
-    assert model.hardware_events == SuperconductingQubitsHardwareEvents(virtual_swap=0)
+    assert len(model.hardware_events.virtual_swap) == 0
 
 
 def test_full_neighborhood_moves_target_to_seat_of_least_recently_used_neighbor_of_source():
@@ -115,7 +115,7 @@ def test_full_neighborhood_moves_target_to_seat_of_least_recently_used_neighbor_
     model = run("CX 0 1\nCX 0 2\nCX 0 3", 4, {2: 4})
 
     assert model._neighborhoods == {0: {2: 1, 3: 2}, 1: {}, 2: {0: 1}, 3: {0: 2}}
-    assert model.hardware_events == SuperconductingQubitsHardwareEvents(virtual_swap=1)
+    assert len(model.hardware_events.virtual_swap) == 1
 
 
 def test_source_without_neighbors_is_moved_next_to_target_instead():
@@ -123,7 +123,7 @@ def test_source_without_neighbors_is_moved_next_to_target_instead():
     model = run("CX 0 1\nCX 2 0", 3, {1: 3})
 
     assert model._neighborhoods == {0: {2: 1}, 1: {}, 2: {0: 1}}
-    assert model.hardware_events == SuperconductingQubitsHardwareEvents(virtual_swap=1)
+    assert len(model.hardware_events.virtual_swap) == 1
 
 
 def test_ties_of_least_recently_used_neighbors_are_broken_randomly():
@@ -277,7 +277,7 @@ def test_gate_reset_measurement_and_two_qubit_noise():
 def test_no_hardware_event_noise_adds_no_identity_instructions():
     model = run("CX 0 1\nCX 0 2", 3, {1: 3}, hardware_event=("None", ()))
 
-    assert model.hardware_events == SuperconductingQubitsHardwareEvents(virtual_swap=1)
+    assert len(model.hardware_events.virtual_swap) == 1
     assert "I " not in str(model.noisy_circuit)
 
 
@@ -316,7 +316,7 @@ def test_steane_neighborhood_invariants_after_every_gate(topology: dict[int, int
 def test_steane_needs_no_swaps_with_enough_connectivity():
     model = run(STEANE_MEASURED, 7, {6: 7})
 
-    assert model.hardware_events == SuperconductingQubitsHardwareEvents(virtual_swap=0)
+    assert len(model.hardware_events.virtual_swap) == 0
 
 
 def test_steane_noisy_circuit_without_noise_equals_input():
