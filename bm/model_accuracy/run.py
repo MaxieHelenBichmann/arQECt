@@ -17,7 +17,7 @@ def run() -> None:
 
     # run abstract execution and compilation for each hardware config and circuit
     abstract_hardware_events = run_ti_abstraction(parameters=parameters, circuit=circuit)
-    concrete_hardware_events = run_ti_compiler(parameters=parameters, circuit=circuit)
+    concrete_hardware_events, compiler_details = run_ti_compiler(parameters=parameters, circuit=circuit)
 
     # TODO: "extract" hardware events from both and compare them
     # A) How well do i approximate the actual recorded hardware events with my abstract execution (eg IZ crossings)
@@ -25,3 +25,4 @@ def run() -> None:
     print(abstract_hardware_events)
     print()
     print(concrete_hardware_events)
+    print(compiler_details)

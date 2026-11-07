@@ -22,18 +22,18 @@ from src.models.hardware import ( TrappedIonsModel, TrappedIonsHardwareEvents, N
 
 
 
-def run_ti_compiler(parameters: dict, circuit: stim.Circuit) -> TrappedIonsHardwareEvents:
+def run_ti_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[TrappedIonsHardwareEvents, dict]: # (proxy information, details)
     """Run the trapped ion compiler on the given circuit."""
     pass
 
 
-def run_na_compiler(parameters: dict, circuit: stim.Circuit) -> NeutralAtomsHardwareEvents:
+def run_na_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[NeutralAtomsHardwareEvents, dict]:
     """Run the neutral atom compiler on the given circuit."""
     pass
 
 
 
-def run_sc_compiler(parameters: dict, circuit: stim.Circuit) -> SuperconductingQubitsHardwareEvents:
+def run_sc_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[SuperconductingQubitsHardwareEvents, dict]:
     """Run the superconducting qubit compiler on the given circuit."""
     pass
 
