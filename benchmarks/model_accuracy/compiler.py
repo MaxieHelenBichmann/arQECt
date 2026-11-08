@@ -500,27 +500,33 @@ def run_sc_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[Supercondu
 # -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-def run_ti_abstraction(hardware: TrappedIonsModel, circuit: stim.Circuit) -> TrappedIonsHardwareEvents:
+def run_ti_abstraction(hardware: TrappedIonsModel, circuit: stim.Circuit) -> tuple[TrappedIonsHardwareEvents, dict]:
     """Run the trapped ion abstract execution on the given circuit."""
+    start = time.perf_counter()
     for op in circuit:
         for group in op.target_groups():
             hardware.process(stim.CircuitInstruction(op.name, group, op.gate_args_copy(), tag=op.tag))
+    wall_clock_s = time.perf_counter() - start
 
-    return hardware.hardware_events
+    return hardware.hardware_events, {"wall_clock_s": wall_clock_s}
 
 
-def run_na_abstraction(hardware: NeutralAtomsModel, circuit: stim.Circuit) -> NeutralAtomsHardwareEvents:
+def run_na_abstraction(hardware: NeutralAtomsModel, circuit: stim.Circuit) -> tuple[NeutralAtomsHardwareEvents, dict]:
     """Run the neutral atom abstract execution on the given circuit."""
+    start = time.perf_counter()
     for op in circuit:
         for group in op.target_groups():
             hardware.process(stim.CircuitInstruction(op.name, group, op.gate_args_copy(), tag=op.tag))
+    wall_clock_s = time.perf_counter() - start
 
-    return hardware.hardware_events
+    return hardware.hardware_events, {"wall_clock_s": wall_clock_s}
 
-def run_sc_abstraction(hardware: SuperconductingQubitsModel, circuit: stim.Circuit) -> SuperconductingQubitsHardwareEvents:
+def run_sc_abstraction(hardware: SuperconductingQubitsModel, circuit: stim.Circuit) -> tuple[SuperconductingQubitsHardwareEvents, dict]:
     """Run the superconducting qubit abstract execution on the given circuit."""
+    start = time.perf_counter()
     for op in circuit:
         for group in op.target_groups():
             hardware.process(stim.CircuitInstruction(op.name, group, op.gate_args_copy(), tag=op.tag))
+    wall_clock_s = time.perf_counter() - start
 
-    return hardware.hardware_events
+    return hardware.hardware_events, {"wall_clock_s": wall_clock_s}

@@ -28,11 +28,12 @@ def run() -> None:
             for circuit in circuits:
                 abstract_hardware, concrete_hardware = prepare_ti_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
 
-                abstract_hardware_events = run_ti_abstraction(hardware=abstract_hardware, circuit=circuit)
+                abstract_hardware_events, abstraction_details = run_ti_abstraction(hardware=abstract_hardware, circuit=circuit)
                 concrete_hardware_events, compiler_details = run_ti_compiler(hardware=concrete_hardware, circuit=circuit)
 
                 # TODO: compare hardware events, aka find good metrics to compare (also the temporal structure)
                 print(f"===== {config} =====")
+                print("abstraction time:", f"{abstraction_details['wall_clock_s']:.4f}s")
                 print("compile time:", f"{compiler_details['wall_clock_s']:.2f}s")
                 print()
                 print("How well do i approximate the actual recorded hardware events with my abstract execution?")
