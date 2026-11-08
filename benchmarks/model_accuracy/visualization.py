@@ -10,12 +10,14 @@ import matplotlib
 
 matplotlib.use("Agg")  # render to files only
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
-from scipy.stats import pearsonr, spearmanr
+from scipy.stats import pearsonr, spearmanr, theilslopes
 
 # chart tokens (light mode): surface, text, recessive grid / axes
 _SURFACE, _TEXT, _TEXT_SECONDARY, _MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#898781"
 _GRID, _BASELINE = "#e1e0d9", "#c3c2b7"
+_FIT = "#e34948"  # regression line: red, distinct from the blue qubit ramp of the points
 # qubit number of a circuit: one blue ramp, light -> dark, fixed over the range of all benchmark circuits (so the same
 # color means the same qubit number in every plot); starts at the lightest step still visible as a dot on the surface
 _QUBIT_CMAP = LinearSegmentedColormap.from_list("qubits", ["#86b6ef", "#6da7ec", "#5598e7", "#3987e5", "#2a78d6",
@@ -79,6 +81,8 @@ def visualize_ti_aggregated(results_dir: Path, max_qubits: int | None = None) ->
 
     out_dir = results_dir / "plots"
     out_dir.mkdir(parents=True, exist_ok=True)
+    for old_file in out_dir.glob("ti_*"):  # remove all previous TI outputs (also of configs that no longer have results)
+        old_file.unlink()
     for config, circuits in sorted(runs.items()):
         slug = re.sub(r"[^a-z0-9]+", "_", config.lower()).strip("_")
         circuits.sort(key=lambda r: r["num_qubits"])  # larger circuits drawn on top
@@ -97,12 +101,23 @@ def visualize_ti_aggregated(results_dir: Path, max_qubits: int | None = None) ->
 
             upper = max([*xs, *ys, 1]) * 1.08
             if identity:  # same quantity on both axes: equal scales, y = x marks a perfect match
-                ax.plot([0, upper], [0, upper], color=_BASELINE, linewidth=1, zorder=1)
+                ax.plot([0, upper], [0, upper], color=_BASELINE, linewidth=1, zorder=1, label="exact match")
                 ax.set_xlim(0, upper)
                 ax.set_ylim(0, upper)
             else:
                 ax.set_xlim(0, max([*xs, 1]) * 1.08)
                 ax.set_ylim(0, max([*ys, 1]) * 1.08)
+            if len(set(xs)) >= 2:  # linear fits y = slope * x + intercept, drawn across the whole x range
+                x_end = ax.get_xlim()[1]
+                # robust: Theil-Sen (median of pairwise slopes), with 95% confidence interval of the slope
+                slope, intercept, slope_low, slope_high = theilslopes(ys, xs)
+                ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=_FIT, linewidth=2, zorder=2,
+                        label=f"robust fit (Theil-Sen), slope 95% CI {slope_low:.2f}–{slope_high:.2f}")
+                # least squares, for comparison (sensitive to outliers); R² = share of the variance explained by the fit
+                slope, intercept = np.polyfit(xs, ys, 1)
+                r_squared = np.corrcoef(xs, ys)[0, 1] ** 2 if len(set(ys)) >= 2 else 0.0
+                ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=_FIT, linewidth=1.2, linestyle=(0, (4, 3)),
+                        zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
             points = ax.scatter(xs, ys, s=56, c=qubits, cmap=_QUBIT_CMAP, vmin=_QUBIT_RANGE[0], vmax=_QUBIT_RANGE[1],
                                 edgecolors=_SURFACE, linewidths=1.5, zorder=3)  # surface ring
             colorbar = fig.colorbar(points, ax=ax, ticks=range(_QUBIT_RANGE[0], _QUBIT_RANGE[1] + 1, 4), fraction=0.05, pad=0.03)
@@ -110,11 +125,14 @@ def visualize_ti_aggregated(results_dir: Path, max_qubits: int | None = None) ->
             colorbar.outline.set_visible(False)
             colorbar.ax.tick_params(colors=_MUTED, labelcolor=_TEXT_SECONDARY, labelsize=9)
 
-            ax.set_title(f"{config}: {title}", loc="left", color=_TEXT, fontsize=12, fontweight="bold")
+            ax.set_title(f"{config}: {title}", loc="left", color=_TEXT, fontsize=12, fontweight="bold", pad=22)
             ax.set_xlabel(x_label, color=_TEXT_SECONDARY, fontsize=10)
             ax.set_ylabel(y_label, color=_TEXT_SECONDARY, fontsize=10)
-            ax.text(0.02, 0.97, _correlation_label(xs, ys), transform=ax.transAxes, va="top", ha="left",
-                    color=_TEXT_SECONDARY, fontsize=9)
+            ax.text(0, 1.02, _correlation_label(xs, ys), transform=ax.transAxes, va="bottom", ha="left",
+                    color=_TEXT_SECONDARY, fontsize=9)  # subtitle line above the plot area, never covers points
+            if ax.get_legend_handles_labels()[0]:  # line legend below the plot area
+                ax.legend(loc="upper left", bbox_to_anchor=(0, -0.13), ncol=1, frameon=False, fontsize=9,
+                          labelcolor=_TEXT_SECONDARY, handlelength=2.4)
             fig.tight_layout()
             fig.savefig(out_dir / f"ti_{slug}__{name}.png", dpi=200, facecolor=_SURFACE)
             plt.close(fig)
@@ -129,6 +147,6 @@ def visualize_ti_aggregated(results_dir: Path, max_qubits: int | None = None) ->
 def _correlation_label(xs: list[int], ys: list[int]) -> str:
     """n, Pearson r and Spearman rho (n/a for fewer than 3 points or a constant axis)."""
     if len(xs) < 3 or len(set(xs)) < 2 or len(set(ys)) < 2:
-        return f"n = {len(xs)}   r = n/a   ρ = n/a"
+        return f"number of circuits = {len(xs)}"
     r, rho = pearsonr(xs, ys).statistic, spearmanr(xs, ys).statistic
-    return f"n = {len(xs)}   r = {r:.2f}   ρ = {rho:.2f}" if not (math.isnan(r) or math.isnan(rho)) else f"n = {len(xs)}"
+    return f"number of circuits = {len(xs)}   Pearson r = {r:.2f}   Spearman ρ = {rho:.2f}" if not (math.isnan(r) or math.isnan(rho)) else f"number of circuits = {len(xs)}"

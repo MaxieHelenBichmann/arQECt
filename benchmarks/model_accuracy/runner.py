@@ -50,9 +50,9 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
             for circuit_name, circuit in circuits.items():
                 abstract_hardware, concrete_hardware = prepare_ti_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
 
-                print(f"Running abstract execution of {circuit_name} on {config["name"]} ({config["platform"]})...")
+                print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
                 abstract_hardware_events, abstraction_details = run_ti_abstraction(hardware=abstract_hardware, circuit=circuit)
-                print(f"Running compilation of {circuit_name} on {config["name"]} ({config["platform"]})...")
+                print(f"[{config["platform"]}] Running compilation of        {circuit_name} on ({config["name"]})...")
                 try:
                     concrete_hardware_events, compiler_details = run_ti_compiler(hardware=concrete_hardware, circuit=circuit, max_compile_time=max_compile_time)
                 except (RuntimeError, TimeoutError) as error:
