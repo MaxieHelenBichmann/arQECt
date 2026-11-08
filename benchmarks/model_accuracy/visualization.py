@@ -42,9 +42,10 @@ ON_TIME = 0.25  # a qubit's abstract events are on time if their weight center i
 
 
 def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = None) -> None:
-    out_dir = results_dir / "plots"
-    out_dir.mkdir(parents=True, exist_ok=True)
     if "TI" in platform:
+        out_dir = results_dir / "ti" / "plots"
+        out_dir.mkdir(parents=True, exist_ok=True)
+         
         for old_file in out_dir.glob("ti_*"):  # remove previous TI outputs (also of configs that no longer have results)
             old_file.unlink()
         runs = defaultdict(list)  # config -> the raw rows of each circuit

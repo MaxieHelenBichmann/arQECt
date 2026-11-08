@@ -66,7 +66,7 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
 
                 metadata = {"config": config["name"], "platform": config["platform"], **config["architecture"],
                             "circuit": circuit_name, "num_qubits": circuit.num_qubits}
-                save_raw_results(_RESULTS_DIR / "raw" / "ti" / f"{config['name']}__{circuit_name}.csv", metadata,
+                save_raw_results(_RESULTS_DIR / "ti" / "raw" / f"{config['name']}__{circuit_name}.csv", metadata,
                                  anchors={qubit: anchors[qubit] for qubit in range(circuit.num_qubits)},
                                  abstract=(abstract_hardware_events, abstraction_details),
                                  compiled=(concrete_hardware_events, compiler_details))
