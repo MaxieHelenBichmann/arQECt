@@ -1,6 +1,5 @@
 import dataclasses
 import pathlib
-import random
 
 import pytest
 import stim
@@ -59,11 +58,6 @@ def without_noise(circuit: stim.Circuit) -> stim.Circuit:
         if not (data.is_noisy_gate and not data.produces_measurements):
             result.append(op)
     return result
-
-
-@pytest.fixture(autouse=True)
-def seed():
-    random.seed(0)
 
 
 # ---------------------------------------------------------------- construction
@@ -268,8 +262,7 @@ def test_no_noise_adds_no_identity_instructions():
 @pytest.mark.parametrize("nr_pairs, readout_capacity", [(1, 1), (1, 3), (2, 1), (3, 3), (7, 7)])
 @pytest.mark.parametrize("seed", range(5))
 def test_steane_zone_invariants_after_every_gate(nr_pairs: int, readout_capacity: int, seed: int):
-    random.seed(seed)
-    model = NeutralAtomsModel(nr_pairs, readout_capacity, make_noise_model())
+    model = NeutralAtomsModel(nr_pairs, readout_capacity, make_noise_model(), seed)
     violations = []
 
     class InvariantCheck:

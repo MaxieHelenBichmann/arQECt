@@ -33,8 +33,8 @@ def make_noise_model(
     )
 
 
-def make_model(nr_qubits: int, topology: dict[int, int], **noise_kwargs) -> SuperconductingQubitsModel:
-    return SuperconductingQubitsModel(nr_qubits, DURATIONS, topology, make_noise_model(**noise_kwargs))
+def make_model(nr_qubits: int, topology: dict[int, int], seed: int = 42, **noise_kwargs) -> SuperconductingQubitsModel:
+    return SuperconductingQubitsModel(nr_qubits, DURATIONS, topology, make_noise_model(**noise_kwargs), seed)
 
 
 def run(
@@ -66,11 +66,6 @@ def with_edges(model: SuperconductingQubitsModel, edges: dict[tuple[int, int], i
         model._neighborhoods[a][b] = time_step
         model._neighborhoods[b][a] = time_step
     return model
-
-
-@pytest.fixture(autouse=True)
-def seed():
-    random.seed(0)
 
 
 # ---------------------------------------------------------------- construction
@@ -129,8 +124,7 @@ def test_source_without_neighbors_is_moved_next_to_target_instead():
 def test_ties_of_least_recently_used_neighbors_are_broken_randomly():
     displaced = set()
     for seed in range(30):
-        random.seed(seed)
-        model = with_edges(make_model(4, {2: 4}), {(0, 1): -1, (0, 2): -1})
+        model = with_edges(make_model(4, {2: 4}, seed), {(0, 1): -1, (0, 2): -1})
         model.process(stim.CircuitInstruction("CX", [0, 3]))
         displaced |= {q for q in (1, 2) if q not in model._neighborhoods[0]}
 
@@ -287,8 +281,7 @@ def test_no_hardware_event_noise_adds_no_identity_instructions():
 @pytest.mark.parametrize("topology", [{1: 7}, {2: 7}, {3: 2, 2: 5}, {4: 7}, {6: 7}])
 @pytest.mark.parametrize("seed", range(5))
 def test_steane_neighborhood_invariants_after_every_gate(topology: dict[int, int], seed: int):
-    random.seed(seed)
-    model = make_model(7, topology)
+    model = make_model(7, topology, seed)
     slots = sorted((d for d, count in topology.items() for _ in range(count)), reverse=True)
     violations = []
 

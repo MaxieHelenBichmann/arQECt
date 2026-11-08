@@ -27,7 +27,7 @@ class TrappedIonsHardwareEvents:
 
 
 class TrappedIonsModel(GateProcessor):
-    def __init__(self, interaction_zone_capacity: int, nr_interaction_sites: int, noise_model: NoiseModel | None = None):
+    def __init__(self, interaction_zone_capacity: int, nr_interaction_sites: int, noise_model: NoiseModel | None = None, seed: int = 42):
         if interaction_zone_capacity < 2:
             raise ValueError("Interaction zone capacity must be at least 2.")
         if nr_interaction_sites < 1:
@@ -36,6 +36,7 @@ class TrappedIonsModel(GateProcessor):
         self.interaction_zone_capacity: int = interaction_zone_capacity 
         self.nr_interaction_sites: int = nr_interaction_sites
         self.noise_model: NoiseModel = noise_model if noise_model is not None else NoiseModel.empty()
+        self._rng: random.Random = random.Random(seed)
 
         self.hardware_events: TrappedIonsHardwareEvents = TrappedIonsHardwareEvents()
         self.noisy_circuit: stim.Circuit = stim.Circuit()
@@ -133,7 +134,7 @@ class TrappedIonsModel(GateProcessor):
         minimal_cost = min(costs)
         minimal_zones = [i for i, cost in enumerate(costs) if cost == minimal_cost]
 
-        return random.choice(minimal_zones)
+        return self._rng.choice(minimal_zones)
 
     def _add_qubit_to_zone(self, qubit: int, zone_id: int) -> None:
         if len(self._zones[zone_id]) < self.interaction_zone_capacity:

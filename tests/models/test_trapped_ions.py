@@ -1,5 +1,4 @@
 import pathlib
-import random
 
 import pytest
 import stim
@@ -28,8 +27,8 @@ def make_noise_model(
     )
 
 
-def run(circuit: str | stim.Circuit, capacity: int, nr_zones: int, **noise_kwargs) -> TrappedIonsModel:
-    model = TrappedIonsModel(capacity, nr_zones, make_noise_model(**noise_kwargs))
+def run(circuit: str | stim.Circuit, capacity: int, nr_zones: int, seed: int = 42, **noise_kwargs) -> TrappedIonsModel:
+    model = TrappedIonsModel(capacity, nr_zones, make_noise_model(**noise_kwargs), seed)
     CircuitAnalyzer(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
     return model
 
@@ -50,11 +49,6 @@ def without_noise(circuit: stim.Circuit) -> stim.Circuit:
         if not (data.is_noisy_gate and not data.produces_measurements):
             result.append(op)
     return result
-
-
-@pytest.fixture(autouse=True)
-def seed():
-    random.seed(0)
 
 
 # ---------------------------------------------------------------- single-qubit gates
@@ -252,8 +246,7 @@ def test_steane_without_capacity_pressure_enters_every_qubit_once():
 @pytest.mark.parametrize("capacity, nr_zones", [(2, 1), (2, 3), (3, 2), (4, 2), (7, 3)])
 @pytest.mark.parametrize("seed", range(5))
 def test_steane_zone_invariants(capacity: int, nr_zones: int, seed: int):
-    random.seed(seed)
-    model = run(STEANE, capacity, nr_zones)
+    model = run(STEANE, capacity, nr_zones, seed)
 
     qubits_in_zones = [qubit for zone in model._zones for qubit in zone]
     assert len(qubits_in_zones) == len(set(qubits_in_zones))  # every qubit in at most one zone

@@ -28,7 +28,7 @@ class SuperconductingQubitsHardwareEvents:
     virtual_swap: list[tuple[HardwareEventLocation, HardwareEventLocation]] = field(default_factory=list)
 
 class SuperconductingQubitsModel(GateProcessor):
-    def __init__(self, number_of_qubits: int, gate_durations: dict[GateKind, float], topology: dict[int, int], noise_model: NoiseModel | None = None):
+    def __init__(self, number_of_qubits: int, gate_durations: dict[GateKind, float], topology: dict[int, int], noise_model: NoiseModel | None = None, seed: int = 42):
         if number_of_qubits < 1:
             raise ValueError("Number of qubits must be at least 1.")
         if not all(degree > 0 and count >= 0 for degree, count in topology.items()):
@@ -42,6 +42,7 @@ class SuperconductingQubitsModel(GateProcessor):
         self.gate_durations: dict[GateKind, float] = gate_durations # needed for idle noise
         self.topology: dict[int, int] = topology  # degree -> max number of qubits with that degree
         self.noise_model: NoiseModel = noise_model if noise_model is not None else NoiseModel.empty()
+        self._rng: random.Random = random.Random(seed)
 
         self.hardware_events: SuperconductingQubitsHardwareEvents = SuperconductingQubitsHardwareEvents()
         self.noisy_circuit: stim.Circuit = stim.Circuit()
@@ -84,11 +85,11 @@ class SuperconductingQubitsModel(GateProcessor):
                 pass
             elif self._neighborhoods[src_qubit]: # prefer moving the target qubit to the place of the lru neighbor of src
                 oldest = min(self._neighborhoods[src_qubit].values())
-                lru_qubit = random.choice([q for q, t in self._neighborhoods[src_qubit].items() if t == oldest])
+                lru_qubit = self._rng.choice([q for q, t in self._neighborhoods[src_qubit].items() if t == oldest])
                 self._swap(lru_qubit, tgt_qubit)
             else: # src has no neighbors to swap with, move src instead
                 oldest = min(self._neighborhoods[tgt_qubit].values())
-                lru_qubit = random.choice([q for q, t in self._neighborhoods[tgt_qubit].items() if t == oldest])
+                lru_qubit = self._rng.choice([q for q, t in self._neighborhoods[tgt_qubit].items() if t == oldest])
                 self._swap(lru_qubit, src_qubit)
 
             self._neighborhoods[src_qubit][tgt_qubit] = self._lru_time_step
