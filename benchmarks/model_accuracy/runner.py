@@ -2,6 +2,7 @@
 """Run the model accuracy experiments by comparing hardware events of different circuits on the abstract executions and actual compilations."""
 
 import csv
+import shutil
 from pathlib import Path
 
 import stim
@@ -16,7 +17,15 @@ _CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" /
 _RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "model_accuracy"
 
 def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_pattern: str = "*",
-        max_qubits: int | None = None, max_compile_time: float = 600.0, visualize_true: bool = True) -> None:
+        max_qubits: int | None = None, max_compile_time: float = 600.0, visualize_true: bool = True, clean: bool = False) -> None:
+    # empty the raw result directories of the platforms that are run (so only results of this run remain)
+    if clean:
+        for platform in platforms or ["TI", "NA", "SC"]:
+            raw_dir = _RESULTS_DIR / "raw" / platform.lower()
+            if raw_dir.exists():
+                shutil.rmtree(raw_dir)
+                print(f"Emptied {raw_dir}...")
+
     # collect different circuits
     circuits = {}
     for circuit_file in sorted(_CIRCUIT_DIR.glob(f"{circuit_pattern}.stim")):
@@ -24,6 +33,7 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
         circuit = stim.Circuit.from_file(circuit_file)
         if max_qubits is None or circuit.num_qubits <= max_qubits:
             circuits[name] = circuit
+    print(f"Collected {len(circuits)} circuits...")
 
     # collect different hardware configs
     configs = []
@@ -32,6 +42,7 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
                 config = yaml.safe_load(f)
         if platforms is None or config["platform"] in platforms:
             configs.append(config)
+    print(f"Collected {len(configs)} hardware configurations...")
 
     # run abstract execution and compilation for each hardware config and circuit
     for config in configs:
@@ -39,10 +50,12 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
             for circuit_name, circuit in circuits.items():
                 abstract_hardware, concrete_hardware = prepare_ti_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
 
+                print(f"Running abstract execution of {circuit_name} on {config["name"]} ({config["platform"]})...")
                 abstract_hardware_events, abstraction_details = run_ti_abstraction(hardware=abstract_hardware, circuit=circuit)
+                print(f"Running compilation of {circuit_name} on {config["name"]} ({config["platform"]})...")
                 try:
                     concrete_hardware_events, compiler_details = run_ti_compiler(hardware=concrete_hardware, circuit=circuit, max_compile_time=max_compile_time)
-                except (RuntimeError, TimeoutError) as error:  # e.g. compilation timeout: skip this circuit, keep going
+                except (RuntimeError, TimeoutError) as error:
                     print(f"Skipped {config['name']} / {circuit_name}: {error}")
                     continue
 
@@ -98,8 +111,10 @@ if __name__ == "__main__":
     parser.add_argument("--max-qubits", type=int, default=None, help="skip circuits with more qubits (default: no limit)")
     parser.add_argument("--max-compile-time", type=float, default=600.0, help="time limit per compilation in seconds (default: 600)")
     parser.add_argument("--no-visualize", action="store_true", help="only write the raw results, no plots")
+    parser.add_argument("--clean", action="store_true",
+                        help="delete all files in the raw result directories of the run platforms before running")
     args = parser.parse_args()
 
     run(platforms=args.platform, circuit_pattern=args.circuits, config_pattern=args.configs, max_qubits=args.max_qubits,
-        max_compile_time=args.max_compile_time, visualize_true=not args.no_visualize)
+        max_compile_time=args.max_compile_time, visualize_true=not args.no_visualize, clean=args.clean)
 
