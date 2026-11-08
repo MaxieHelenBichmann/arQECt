@@ -3,6 +3,7 @@
 
 import csv
 import shutil
+from collections import Counter
 from pathlib import Path
 
 import stim
@@ -48,6 +49,10 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
     for config in configs:
         if config["platform"] == "TI":
             for circuit_name, circuit in circuits.items():
+                # anchors per qubit: 2q gates, measurements and resets (MR counts as one anchor, as in TrappedIonsModel)
+                anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
+                                  if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
+                                  or stim.gate_data(op.name).is_reset)
                 abstract_hardware, concrete_hardware = prepare_ti_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
 
                 print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
@@ -62,6 +67,7 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
                 metadata = {"config": config["name"], "platform": config["platform"], **config["architecture"],
                             "circuit": circuit_name, "num_qubits": circuit.num_qubits}
                 save_raw_results(_RESULTS_DIR / "raw" / "ti" / f"{config['name']}__{circuit_name}.csv", metadata,
+                                 anchors={qubit: anchors[qubit] for qubit in range(circuit.num_qubits)},
                                  abstract=(abstract_hardware_events, abstraction_details),
                                  compiled=(concrete_hardware_events, compiler_details))
 
@@ -77,9 +83,10 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
         visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits)
 
 
-def save_raw_results(file: Path, metadata: dict, abstract: tuple, compiled: tuple) -> None:
+def save_raw_results(file: Path, metadata: dict, anchors: dict[int, int], abstract: tuple, compiled: tuple) -> None:
     """Store one comparison (one hardware config, one circuit) as CSV: the metadata, then source, metric, qubit, anchor, count, value.
 
+    - circuit anchors: one row per qubit (source "circuit"), with its number of anchor operations in `value`
     - event lists (e.g. interaction_zone_entry): one row per event, in list (= chronological) order, count 1
     - {(qubit, anchor): count} details (e.g. shuttles, swaps): one row per entry
     - other details (e.g. wall_clock_s): one row with the number in `value`
@@ -88,6 +95,8 @@ def save_raw_results(file: Path, metadata: dict, abstract: tuple, compiled: tupl
     with open(file, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([*metadata, "source", "metric", "qubit", "anchor", "count", "value"])
+        for qubit, num_anchors in anchors.items():
+            writer.writerow([*metadata.values(), "circuit", "anchors", qubit, "", "", num_anchors])
         for source, (events, details) in {"abstract": abstract, "compiled": compiled}.items():
             for metric, locations in vars(events).items():
                 for qubit, anchor in locations:
