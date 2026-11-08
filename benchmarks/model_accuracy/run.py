@@ -31,25 +31,24 @@ def run() -> None:
                 abstract_hardware_events = run_ti_abstraction(hardware=abstract_hardware, circuit=circuit)
                 concrete_hardware_events, compiler_details = run_ti_compiler(hardware=concrete_hardware, circuit=circuit)
 
-                # TODO: compare hardware events
-                # A) How well do i approximate the actual recorded hardware events with my abstract execution (eg IZ crossings)
-                # B) How good of a proxy are these recorded hardware events (eg IZ crossings) to the actual relevant metric (eg shuttling operations)
+                # TODO: compare hardware events, aka find good metrics to compare (also the temporal structure)
                 print(f"===== {config} =====")
+                print("compile time:", f"{compiler_details['wall_clock_s']:.2f}s")
+                print()
+                print("How well do i approximate the actual recorded hardware events with my abstract execution?")
                 print("abstract:", abstract_hardware_events)
                 print("compiled:", concrete_hardware_events)
-                print("compile time:", f"{compiler_details['wall_clock_s']:.2f}s")
-                print("architecture:", compiler_details["architecture"])
+                print()
                 print("IZ entries (abstract vs compiled):", len(abstract_hardware_events.interaction_zone_entry), "vs", len(concrete_hardware_events.interaction_zone_entry))
                 print("IZ evictions (abstract vs compiled):", len(abstract_hardware_events.interaction_zone_eviction), "vs", len(concrete_hardware_events.interaction_zone_eviction))
-                print("shuttles:", compiler_details["num_shuttles"])
-                print("makespan (timesteps):", compiler_details["num_timesteps"])
-                if "shuttles_per_qubit" in compiler_details:  # ring / grid (multi_shuttler)
-                    print("shuttles per qubit:", compiler_details["shuttles_per_qubit"])
-                if "result" in compiler_details:  # linear: full compiled schedule (Shuttle(ion, src, dst), PhysicalSwap(...), Rzz(ion_a, ion_b))
-                    print("action counts:", compiler_details["action_counts"])
+                print()
+                print("How good of a proxy are these recorded hardware events to the actual relevant metrics?")
+                print("shuttles (qubit, anchor) -> count: ", compiler_details["shuttles"])
+                print("physical (in trap) swaps (qubit, anchor) -> count:", compiler_details["swaps"])
                 print()
 
-                # TODO: write the data somewhere to visualize
+                # TODO: write the data somewhere so a visualizer can read it
+
         elif config["platform"] == "NA":
             pass
         elif config["platform"] == "SC":

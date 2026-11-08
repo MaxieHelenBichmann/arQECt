@@ -5,6 +5,7 @@ import io
 import json
 import math
 import os
+import random
 import re
 import tempfile
 import time
@@ -19,7 +20,7 @@ from src.models.noise.noise import NoiseModel
 from mqt.ionshuttler.linear import (
     Architecture as TIArchitecture, LinearCompiler, CompilationStatus, LinearCompilerConfig, SearchConfig
 )
-from mqt.ionshuttler.linear.actions import Shuttle, PhysicalSwap, Rx, Rzz, AdvanceTime
+from mqt.ionshuttler.linear.actions import Shuttle, PhysicalSwap, Rx, Rzz
 from mqt.ionshuttler.multi_shuttler.main import main as ms_main
 from mqt.ionshuttler.multi_shuttler.outside import shuttle as ms_shuttle
 
@@ -42,16 +43,8 @@ from src.models.hardware import ( TrappedIonsModel, TrappedIonsHardwareEvents, N
 
 
 def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[TrappedIonsHardwareEvents, dict]: # (proxy information, details)
-    """Run the trapped ion compiler (MQT IonShuttler) on the given circuit, for hardware from `prepare_ti_hardware`.
-
-    A `linear` Architecture is compiled with the `linear` compiler (A* search, bounded by `max_compile_time`), a
-    `multi_shuttler` config (ring / grid) with `multi_shuttler` (heuristic). Both use their default initial placement.
-
-    Translation is 1:1 (one stim target group -> one native op), only the interaction structure matters for shuttling:
-    2q gates -> Rzz, measurements/resets (anchors) -> Rx, other 1q gates -> Ry (all physical, i.e. need the ion in a zone).
-    IZ entries/evictions are reconstructed by replaying the schedule, anchored like in `TrappedIonsModel`.
-    """
-    # Adapt circuit: transpilation + stim -> qiskit
+    """Run the trapped ion compiler (MQT IonShuttler) on the given circuit and given hardware architecture."""
+    # 1-to-1 transpilation (one stim target group -> one native op) and format change (stim -> qiskit)
     qc = QuantumCircuit(circuit.num_qubits)
     for op in circuit:
         data = stim.gate_data(op.name)
@@ -68,20 +61,27 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
     qubit_steps: defaultdict[int, int] = defaultdict(int)  # ion -> number of completed anchor operations
     num_qubits = circuit.num_qubits
 
-    if isinstance(hardware, TIArchitecture):
+    if isinstance(hardware, TIArchitecture): # linear architecture
+        # compile (initial layout: ions spread evenly over the storage sites)
         arch = hardware
         config = LinearCompilerConfig(search=SearchConfig(max_compile_time=max_compile_time))
-        result = LinearCompiler(arch, config=config).compile(qc)
+        storage_sites = [site for site in range(arch.num_sites) if arch.get_processing_zone(site) is None]
+        initial_positions = [storage_sites[i * len(storage_sites) // num_qubits] for i in range(num_qubits)]
+        result = LinearCompiler(arch, config=config).compile(qc, initial_positions=initial_positions)
         if result.status is not CompilationStatus.SUCCESS:
             raise RuntimeError(f"Trapped ion compilation did not succeed: {result.status}")
 
-        # replay schedule: a Shuttle moves one ion to an adjacent empty site, a PhysicalSwap exchanges two adjacent ions
-        # (reordering, not counted as transport, but it moves ions across a zone boundary if it happens there)
+        # extract events by replaying schedule
+        shuttles: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> number of shuttles of that qubit there
+        swaps: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> number of swaps that qubit took part in there
         for action in result.path:
             if isinstance(action, Shuttle):
                 moves = [(action.ion, action.src, action.dst)]
+                shuttles[(action.ion, qubit_steps[action.ion])] += 1
             elif isinstance(action, PhysicalSwap):
                 moves = [(action.ion_a, action.pos_a, action.pos_b), (action.ion_b, action.pos_b, action.pos_a)]
+                swaps[(action.ion_a, qubit_steps[action.ion_a])] += 1
+                swaps[(action.ion_b, qubit_steps[action.ion_b])] += 1
             else:
                 moves = []
                 if isinstance(action, Rzz):
@@ -96,22 +96,16 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
                 if zone_src != zone_dst and zone_dst is not None:
                     hardware_events.interaction_zone_entry.append((ion, qubit_steps[ion]))
 
-        action_counts = Counter(type(action).__name__ for action in result.path if not isinstance(action, AdvanceTime))
         details = {
-            "action_counts": dict(action_counts),  # Shuttle, PhysicalSwap, Rzz, Rx, Ry
-            "num_shuttles": action_counts["Shuttle"],  # ion moves by one site
-            "num_timesteps": result.num_timesteps,  # makespan
+            "shuttles": dict(sorted(shuttles.items())),  # (qubit, completed anchors) -> nr of single-site moves of that qubit there
+            "swaps": dict(sorted(swaps.items())),  # (qubit, completed anchors) -> nr of swaps that qubit took part in there (each swap appears for both ions)
             "wall_clock_s": result.wall_clock_s,
-            "architecture": arch.to_dict(),
-            "result": result,  # full CompilationResult (result.path holds the ordered actions; ion = stim qubit index)
         }
 
-    else:
-        # multi_shuttler reads the circuit from <qasm_base_dir>/<algorithm_name>/<algorithm_name>_<num_ions>.qasm
+    else:  # ring or grid architecture
+        # compile  (multi_shuttler is a bit more annoying to run)
         config = {**hardware, "algorithm_name": "circuit", "abs_num_ions": num_qubits}
 
-        # multi_shuttler only reports the number of timesteps, so record its per-timestep ion positions (ion -> trap edge)
-        # and its finished gates by temporarily wrapping the two functions its scheduling loop calls for that
         timeline: list = []  # ("positions", graph, {ion: edge}) | ("gates", graph, [gate ids])
         get_ions, remove_processed_gates = ms_shuttle.get_ions, ms_shuttle.remove_processed_gates
         def record_positions(graph):
@@ -125,24 +119,29 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
 
         ms_shuttle.get_ions, ms_shuttle.remove_processed_gates = record_positions, record_gates
         cwd = os.getcwd()
+        rng_state = random.getstate()
         try:
             with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
                 os.makedirs(os.path.join(tmp, "circuit"))
                 with open(os.path.join(tmp, "circuit", f"circuit_{num_qubits}.qasm"), "w") as f:
                     f.write(qasm2.dumps(qc))
-                os.chdir(tmp)  # multi_shuttler writes a runs/ folder into the working directory
+                os.chdir(tmp)
                 start = time.perf_counter()
-                num_timesteps = ms_main({**config, "qasm_base_dir": tmp})
+                ms_main({**config, "qasm_base_dir": tmp})
                 wall_clock_s = time.perf_counter() - start
         finally:
             os.chdir(cwd)
+            random.setstate(rng_state)
             ms_shuttle.get_ions, ms_shuttle.remove_processed_gates = get_ions, remove_processed_gates
 
-        # replay: an ion enters / leaves a gate zone when it moves onto / off a zone's parking edge
+        # extract events by replaying schedule
         graph = timeline[0][1]
         zone_edges = {tuple(sorted(pz.parking_edge, key=sum)) for pz in graph.pzs}
+        edge_graph = nx.line_graph(nx.Graph(graph))  # nodes = trap edges, adjacent if they share a node
+        def edge_distance(a, b) -> int:  # an ion occasionally moves more than one edge per timestep (e.g. out of a zone's exit leg)
+            return nx.shortest_path_length(edge_graph, a if a in edge_graph else a[::-1], b if b in edge_graph else b[::-1])
         positions = dict(timeline[0][2])
-        moves_per_qubit: Counter[int] = Counter()
+        shuttles = Counter()  # (qubit, completed anchors) -> number of single-edge moves of that qubit there
         for kind, _, data in timeline:
             if kind == "gates":
                 for gate_id in data:
@@ -153,7 +152,7 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
                 continue
             for ion, edge in data.items():
                 if edge != positions[ion]:
-                    moves_per_qubit[ion] += 1
+                    shuttles[(ion, qubit_steps[ion])] += edge_distance(positions[ion], edge)
                     if positions[ion] in zone_edges:
                         hardware_events.interaction_zone_eviction.append((ion, qubit_steps[ion]))
                     if edge in zone_edges:
@@ -161,13 +160,9 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
             positions = dict(data)
 
         details = {
-            "num_shuttles": sum(moves_per_qubit.values()),  # ion moves by one trap edge (incl. through junctions)
-            "shuttles_per_qubit": dict(sorted(moves_per_qubit.items())),
-            "num_timesteps": num_timesteps,  # makespan
+            "shuttles": dict(sorted(shuttles.items())),  # (qubit, completed anchors) -> nr of single-edge moves of that qubit there (incl. being pushed along by a rotation)
+            "swaps": {},  # multi_shuttler has no explicit swap operation (blocking ions are pushed along by rotating cycles, counted as shuttles)
             "wall_clock_s": wall_clock_s,
-            "architecture": config,
-            "nr_trap_edges": sum(1 for *_, t in graph.edges(data="edge_type") if t == "trap"),
-            "initial_positions": dict(sorted(timeline[0][2].items())),  # ion -> trap edge
         }
 
     expected_steps = Counter(t.value for op in circuit for group in op.target_groups() for t in group
@@ -175,6 +170,7 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
                              or stim.gate_data(op.name).is_reset)
     if dict(qubit_steps) != dict(expected_steps):
         raise RuntimeError("Trapped ion schedule replay does not reproduce the anchor operations of the circuit.")
+    
     return hardware_events, details
 
 
