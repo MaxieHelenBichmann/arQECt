@@ -1,4 +1,5 @@
 platform: TI
+name: "2D QCCD"
 architecture:
   topology: "grid"
   nr_zones: 4

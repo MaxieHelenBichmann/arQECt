@@ -170,7 +170,7 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
     expected_steps = Counter(t.value for op in circuit for group in op.target_groups() for t in group
                              if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
                              or stim.gate_data(op.name).is_reset)
-    if dict(qubit_steps) != dict(expected_steps):
+    if {qubit: steps for qubit, steps in qubit_steps.items() if steps} != dict(expected_steps):  # idle ions may appear with 0
         raise RuntimeError("Trapped ion schedule replay does not reproduce the anchor operations of the circuit.")
     
     return hardware_events, details

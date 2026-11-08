@@ -1,4 +1,5 @@
 platform: TI
+name: "Quantinuum H1"
 architecture:
   topology: "linear"
   nr_zones: 1

@@ -1,4 +1,5 @@
 platform: TI
+name: "Quantinuum Helios"
 architecture:
   topology: "ring"
   nr_zones: 2
