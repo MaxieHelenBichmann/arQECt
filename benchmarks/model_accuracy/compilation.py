@@ -15,8 +15,6 @@ import stim
 from mqt.core.ir import QuantumComputation
 from qiskit import QuantumCircuit, qasm2
 
-from src.models.noise.noise import NoiseModel
-
 from mqt.ionshuttler.linear import (
     Architecture as TIArchitecture, LinearCompiler, CompilationStatus, LinearCompilerConfig, SearchConfig
 )
@@ -30,7 +28,6 @@ from mqt.qmap.na.zoned import (
     RoutingAwareCompiler,
 )
 
-from mqt.qmap.plugins.qiskit.sc import compile_
 import networkx as nx
 from mqt.core.ir.operations import OpType
 from mqt.qmap.sc import (

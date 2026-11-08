@@ -22,7 +22,7 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
     # empty the raw result directories of the platforms that are run (so only results of this run remain)
     if clean:
         for platform in platforms or ["TI", "NA", "SC"]:
-            raw_dir = _RESULTS_DIR / "raw" / platform.lower()
+            raw_dir = _RESULTS_DIR / platform.lower() / "raw"
             if raw_dir.exists():
                 shutil.rmtree(raw_dir)
                 print(f"Emptied {raw_dir}...")
