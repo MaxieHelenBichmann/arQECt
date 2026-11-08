@@ -5,11 +5,12 @@ import stim
 import yaml
 from pathlib import Path
 
-from benchmarks.model_accuracy.compiler import run_ti_compiler, run_na_compiler, run_sc_compiler, run_ti_abstraction
-from benchmarks.model_accuracy.architecture import prepare_ti_hardware, prepare_na_hardware, prepare_sc_hardware
+from benchmarks.model_accuracy.compilation import run_ti_compiler, run_na_compiler, run_sc_compiler, run_ti_abstraction
+from benchmarks.model_accuracy.architecture_preparation import prepare_ti_hardware, prepare_na_hardware, prepare_sc_hardware
 
 _CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / "configs"
 _CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / "circuits"
+_RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "model_accuracy"
 
 def run() -> None:
     # collect different circuits
