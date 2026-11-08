@@ -12,6 +12,7 @@ matplotlib.use("Agg")  # render to files only
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.ticker import MaxNLocator
 from scipy.stats import pearsonr, spearmanr, theilslopes
 
 # chart tokens (light mode): surface, text, recessive grid / axes
@@ -34,12 +35,18 @@ def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = N
         pass
     
 def visualize_ti_aggregated(results_dir: Path, max_qubits: int | None = None) -> None:
-    """Scatter abstract vs compiled metrics, aggregated per circuit, one figure per TI hardware config.
+    """Scatter aggregated abstract vs compiled metrics.
 
-    Reads every raw file in `<results_dir>/raw/ti` (one config, one circuit each; only circuits with at most `max_qubits`
-    qubits if given), sums its counts per (source, metric), colors each point by the circuit's qubit number, and
-    writes one scatter plot per comparison, `<results_dir>/plots/ti_<config>__<comparison>.png` (one point per circuit),
-    plus `ti_<config>__aggregated.csv` with the plotted totals.
+    Each figure compares the aggregated (over the whole circuit) numbers of a certain hardware events.
+    Thus 4 figures per hardware configuration, answering 2 questions:
+
+    A) How well does the abstract hardware model approximate certain concrete hardware events compared to the actually compiled circuit?
+    - abstract vs concrete interaction zone entries
+    - abstract vs concrete interaction zone evictions 
+    - abstract vs concrete interaction zone changes (entries + evictions)
+
+    B) How well do the abstract hardware events function as a proxy for the relevant concrete hardware events in the compiled circuit?
+    - abstract interaction zone changes VS concrete movement (shuttling + physical swap) operations
     """
     # aggregate each raw file into totals per (source, metric), grouped by hardware config
     runs: defaultdict[str, list[dict]] = defaultdict(list)  # config -> one entry per circuit
@@ -51,9 +58,12 @@ def visualize_ti_aggregated(results_dir: Path, max_qubits: int | None = None) ->
         if max_qubits is not None and int(rows[0]["num_qubits"]) > max_qubits:
             continue
         totals: Counter[tuple[str, str]] = Counter()
+        wall_clock_s: dict[str, float] = {}  # source -> run time of the abstract execution / compilation
         for row in rows:
             if row["count"]:  # event / anchored rows (detail rows only carry a JSON `value`)
                 totals[(row["source"], row["metric"])] += int(row["count"])
+            elif row["metric"] == "wall_clock_s":
+                wall_clock_s[row["source"]] = float(row["value"])
         runs[rows[0]["config"]].append({
             "circuit": rows[0]["circuit"],
             "num_qubits": int(rows[0]["num_qubits"]),
@@ -63,6 +73,8 @@ def visualize_ti_aggregated(results_dir: Path, max_qubits: int | None = None) ->
             "compiled_iz_eviction": totals[("compiled", "interaction_zone_eviction")],
             "compiled_shuttles": totals[("compiled", "shuttles")],
             "compiled_swaps": totals[("compiled", "swaps")],  # counted per ion, i.e. ion moves (see compilation.py)
+            "abstract_wall_clock_s": wall_clock_s.get("abstract", math.nan),
+            "compiled_wall_clock_s": wall_clock_s.get("compiled", math.nan),
         })
 
     # (file name, title, x label, y label, x, y, draw y = x reference)
@@ -87,6 +99,9 @@ def visualize_ti_aggregated(results_dir: Path, max_qubits: int | None = None) ->
         slug = re.sub(r"[^a-z0-9]+", "_", config.lower()).strip("_")
         circuits.sort(key=lambda r: r["num_qubits"])  # larger circuits drawn on top
         qubits = [r["num_qubits"] for r in circuits]
+        mean_compile_s = np.nanmean([r["compiled_wall_clock_s"] for r in circuits])
+        mean_abstract_s = np.nanmean([r["abstract_wall_clock_s"] for r in circuits])
+        runtime_label = f"avg. run time: compilation {mean_compile_s:.3g} s vs abstract execution {mean_abstract_s:.3g} s"
 
         for name, title, x_label, y_label, fx, fy, identity in comparisons:
             xs, ys = [fx(r) for r in circuits], [fy(r) for r in circuits]
@@ -98,6 +113,8 @@ def visualize_ti_aggregated(results_dir: Path, max_qubits: int | None = None) ->
             for side in ("left", "bottom"):
                 ax.spines[side].set_color(_BASELINE)
             ax.tick_params(colors=_MUTED, labelcolor=_TEXT_SECONDARY, labelsize=9)
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # event counts: integer ticks only
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
             upper = max([*xs, *ys, 1]) * 1.08
             if identity:  # same quantity on both axes: equal scales, y = x marks a perfect match
@@ -118,6 +135,7 @@ def visualize_ti_aggregated(results_dir: Path, max_qubits: int | None = None) ->
                 r_squared = np.corrcoef(xs, ys)[0, 1] ** 2 if len(set(ys)) >= 2 else 0.0
                 ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=_FIT, linewidth=1.2, linestyle=(0, (4, 3)),
                         zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
+            ax.plot([], [], linestyle="none", label=runtime_label)  # text-only legend entry
             points = ax.scatter(xs, ys, s=56, c=qubits, cmap=_QUBIT_CMAP, vmin=_QUBIT_RANGE[0], vmax=_QUBIT_RANGE[1],
                                 edgecolors=_SURFACE, linewidths=1.5, zorder=3)  # surface ring
             colorbar = fig.colorbar(points, ax=ax, ticks=range(_QUBIT_RANGE[0], _QUBIT_RANGE[1] + 1, 4), fraction=0.05, pad=0.03)
