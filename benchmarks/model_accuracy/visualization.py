@@ -464,7 +464,7 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
     A + B) estimation of swaps
     - number of abstract VS compiled virtual swaps during the whole circuit
 
-    (the optimal outcome is for all data points to lie on the angle bisector)
+    (the counts are not expected to match, only to scale similarly)
     """
     # 1) one row per circuit with the summed counts (the raw files have one row per swapped qubit, i.e. two per swap)
     scores = []
@@ -492,7 +492,7 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
     # 2) the plots: (file name, title, x column, y column, x label, y label, same quantity on both axes)
     plots = [
         ("swaps", "virtual swaps", "abstract_swaps", "compiled_swaps",
-         "abstract virtual swaps", "compiled swaps", True),
+         "abstract virtual swaps", "compiled swaps", False),
     ]
     for name, title, x_key, y_key, x_label, y_label, same_quantity in plots:
         xs = [c[x_key] for c in scores]
