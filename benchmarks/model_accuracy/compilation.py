@@ -44,7 +44,7 @@ from src.models.hardware import ( TrappedIonsModel, TrappedIonsHardwareEvents, N
 
 def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[TrappedIonsHardwareEvents, dict]: # (proxy information, details)
     """Run the trapped ion compiler (MQT IonShuttler) on the given circuit and given hardware architecture."""
-    # 1-to-1 transpilation (one stim target group -> one native op) and format change (stim -> qiskit)
+    # 1.) 1-to-1 transpilation (one stim target group -> one native op) and format change (stim -> qiskit)
     qc = QuantumCircuit(circuit.num_qubits)
     for op in circuit:
         data = stim.gate_data(op.name)
@@ -62,7 +62,7 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
     num_qubits = circuit.num_qubits
 
     if isinstance(hardware, TIArchitecture): # linear architecture
-        # compile (initial layout: ions spread evenly over the storage sites)
+        # 2.) compile (initial layout: ions spread evenly over the storage sites)
         arch = hardware
         config = LinearCompilerConfig(search=SearchConfig(max_compile_time=max_compile_time))
         storage_sites = [site for site in range(arch.num_sites) if arch.get_processing_zone(site) is None]
@@ -71,7 +71,7 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
         if result.status is not CompilationStatus.SUCCESS:
             raise RuntimeError(f"Trapped ion compilation did not succeed: {result.status}")
 
-        # extract events by replaying schedule
+        # 3.) extract events by replaying schedule
         shuttles: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> number of shuttles of that qubit there
         swaps: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> number of swaps that qubit took part in there
         for action in result.path:
@@ -103,7 +103,7 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
         }
 
     else:  # ring or grid architecture
-        # compile  (multi_shuttler is a bit more annoying to run)
+        # 2.) compile  (multi_shuttler is a bit more annoying to run)
         config = {**hardware, "algorithm_name": "circuit", "abs_num_ions": num_qubits}
 
         timeline: list = []  # ("positions", graph, {ion: edge}) | ("gates", graph, [gate ids])
@@ -136,7 +136,7 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
             random.setstate(rng_state)
             ms_shuttle.get_ions, ms_shuttle.remove_processed_gates = get_ions, remove_processed_gates
 
-        # extract events by replaying schedule
+        # 3.) extract events by replaying schedule
         graph = timeline[0][1]
         zone_edges = {tuple(sorted(pz.parking_edge, key=sum)) for pz in graph.pzs}
         edge_graph = nx.line_graph(nx.Graph(graph))  # nodes = trap edges, adjacent if they share a node
@@ -304,130 +304,28 @@ def run_na_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[NeutralAto
 
 
 
-def run_sc_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[SuperconductingQubitsHardwareEvents, dict]:
-    """Run the superconducting qubit compiler (MQT QMAP heuristic mapper) on the given circuit.
-
-    Translation is 1:1 on the interaction structure: 2q gates -> CX (control/target order kept), measurements/resets (anchors)
-    -> RZ (used as a marker, as in `run_na_compiler`), other 1q gates -> H. Pre-/post-mapping optimizations are disabled, so
-    the mapped circuit is the input plus inserted SWAPs (no gate cancellation, fusion or SWAP decomposition).
-    The coupling graph is a compact patch of a device lattice (square, hex, heavy-hex, octagonal) with one physical qubit per
-    circuit qubit; the lattice is `parameters["layout"]` or inferred from the degrees in the abstract `topology`. With layout
-    "random", the largest degrees of the topology are assigned to the circuit qubits (like in `SuperconductingQubitsModel`),
-    and among random connected graphs with that degree sequence the one with the smallest average distance is used.
-    Virtual swaps are reconstructed by replaying the SWAPs on the layout, anchored like in `SuperconductingQubitsModel`.
-    """
-    # translate stim -> mqt, compacting unused qubit indices (every index would become a logical qubit to place)
-    used_qubits = sorted({t.value for op in circuit for t in op.targets_copy() if t.is_qubit_target})
-    to_logical = {qubit: logical for logical, qubit in enumerate(used_qubits)}
-    num_qubits = len(used_qubits)
-    qc = QuantumComputation(num_qubits)
-    expected_ops: defaultdict[int, list] = defaultdict(list)  # logical -> anchor ops in order (sanity check of the replay)
+def run_sc_compiler(hardware: SCArchitecture, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[SuperconductingQubitsHardwareEvents, dict]:
+    """Run the superconducting qubit compiler (MQT QMAP heuristic mapper) on the given circuit and given hardware architecture."""
+    # 1.) 1-to-1 transpilation (one stim target group -> one native op) and format change (stim -> mqt);
+    qc = QuantumComputation(circuit.num_qubits)
     for op in circuit:
         data = stim.gate_data(op.name)
-        if not (data.is_unitary or data.produces_measurements or data.is_reset):
-            continue  # TICK, DETECTOR, noise channels, ...
         for group in op.target_groups():
-            logicals = [to_logical[t.value] for t in group]
+            qubits = [t.value for t in group]
             if data.is_two_qubit_gate:
-                qc.cx(*logicals)
-                expected_ops[logicals[0]].append(("cx", logicals[1]))
-                expected_ops[logicals[1]].append(("cx", logicals[0]))
+                qc.cx(*qubits)
             elif data.produces_measurements or data.is_reset:  # MR counts as one anchor, as in SuperconductingQubitsModel
-                qc.rz(1.0, *logicals)
-                expected_ops[logicals[0]].append(("rz",))
+                qc.rz(1.0, *qubits)
             else:
-                qc.h(*logicals)
+                qc.h(*qubits)
 
-    # A) architecture: one physical qubit per circuit qubit (no empty sites, as in the abstract model)
-    # layout: explicit `parameters["layout"]`, otherwise inferred from the degrees in the topology:
-    # {4, ...} -> square grid, {3} -> hex (honeycomb), {3, 2, ...} -> heavy-hex, anything else -> random graph.
-    # Octagonal (Rigetti Aspen) is 3-regular in the bulk like hex, so it can only be selected explicitly.
-    topology_degrees = {d for d, count in parameters["topology"].items() if count > 0}
-    lattice_name = parameters.get("layout") or (
-        "square" if max(topology_degrees) == 4 else
-        "hex" if topology_degrees == {3} else
-        "heavy_hex" if max(topology_degrees) == 3 and 2 in topology_degrees else
-        "random"
-    )
-    if lattice_name == "random":
-        # degrees = the `num_qubits` largest slots of the topology (like in the abstract model); among random connected
-        # graphs with that degree sequence, the one with the smallest average distance is used
-        degrees = sorted((d for d, count in parameters["topology"].items() for _ in range(count)), reverse=True)[:num_qubits]
-        if len(degrees) < num_qubits:
-            raise ValueError(f"Topology {parameters['topology']} has fewer slots than the {num_qubits} circuit qubits.")
-        degrees = [min(d, num_qubits - 1) for d in degrees]  # no multi-edges / self-loops
-        if sum(degrees) % 2:  # a graph has an even degree sum: drop one stub from the smallest positive degree
-            degrees[max(i for i, d in enumerate(degrees) if d > 0)] -= 1
-        best_graph, best_distance = None, math.inf
-        for seed in range(parameters.get("topology_samples", 200)):
-            try:
-                graph = nx.random_degree_sequence_graph(degrees, seed=parameters.get("seed", 0) * 100_003 + seed, tries=100)
-            except nx.NetworkXError:  # non-graphical sequence / sampling failed
-                continue
-            if nx.is_connected(graph) and (distance := nx.average_shortest_path_length(graph)) < best_distance:
-                best_graph, best_distance = graph, distance
-        if best_graph is None:
-            raise RuntimeError(f"Could not construct a connected coupling graph with degrees {degrees}.")
-    else:
-        # device lattice (large enough), nodes with a "pos" attribute; the device is the compact patch of `num_qubits` qubits
-        # around the center (by hop distance, ties by euclidean distance), i.e. a small chip of that family
-        side = math.ceil(math.sqrt(num_qubits)) + 3
-        if lattice_name == "square":
-            lattice = nx.grid_2d_graph(side, side)
-            nx.set_node_attributes(lattice, {node: node for node in lattice}, "pos")
-        elif lattice_name in ("hex", "heavy_hex"):
-            hexagons = nx.hexagonal_lattice_graph(side, side)
-            if lattice_name == "hex":
-                lattice = hexagons
-            else:  # heavy-hex: an extra (degree 2) qubit on every edge of the honeycomb
-                lattice = nx.Graph()
-                lattice.add_nodes_from(hexagons.nodes(data=True))
-                for u, v in hexagons.edges:
-                    (ux, uy), (vx, vy) = hexagons.nodes[u]["pos"], hexagons.nodes[v]["pos"]
-                    lattice.add_node((u, v), pos=((ux + vx) / 2, (uy + vy) / 2))
-                    lattice.add_edges_from([(u, (u, v)), ((u, v), v)])
-        elif lattice_name == "octagonal":  # grid of 8-qubit rings, neighboring rings coupled by 2 edges (Rigetti Aspen)
-            lattice = nx.Graph()
-            for row in range(side):
-                for col in range(side):
-                    for i in range(8):  # node i at angle (i + 0.5) * 45°: 0/7 right, 1/2 top, 3/4 left, 5/6 bottom
-                        angle = (i + 0.5) * math.pi / 4
-                        lattice.add_node((row, col, i), pos=(3 * col + math.cos(angle), 3 * row + math.sin(angle)))
-                        lattice.add_edge((row, col, i), (row, col, (i + 1) % 8))
-                    if col > 0:
-                        lattice.add_edges_from([((row, col - 1, 0), (row, col, 3)), ((row, col - 1, 7), (row, col, 4))])
-                    if row > 0:
-                        lattice.add_edges_from([((row - 1, col, 1), (row, col, 6)), ((row - 1, col, 2), (row, col, 5))])
-        else:
-            raise ValueError(f"Unknown layout {lattice_name!r} (square, hex, heavy_hex, octagonal, random).")
-        pos = nx.get_node_attributes(lattice, "pos")
-        centroid = [sum(p[k] for p in pos.values()) / len(pos) for k in (0, 1)]
-        # grow a patch from a start qubit, always adding the neighboring qubit with the most couplings into the patch, ties by
-        # euclidean distance to the patch centroid (keeps it round and closes rings); over several start qubits near the lattice
-        # center, the patch with the most couplings (then smallest average distance) is the device
-        best_graph, best_key = None, None
-        for start in sorted(lattice, key=lambda node: (math.dist(pos[node], centroid), str(node)))[:24]:
-            patch = [start]
-            while len(patch) < num_qubits:
-                frontier = {n for node in patch for n in lattice[node]} - set(patch)
-                patch_centroid = [sum(pos[node][k] for node in patch) / len(patch) for k in (0, 1)]
-                patch.append(min(frontier, key=lambda node: (-sum(n in patch for n in lattice[node]),
-                                                             round(math.dist(pos[node], patch_centroid), 6), str(node))))
-            graph = nx.relabel_nodes(lattice.subgraph(patch), {node: i for i, node in enumerate(patch)})  # connected
-            key = (-graph.number_of_edges(), nx.average_shortest_path_length(graph) if num_qubits > 1 else 0.0)
-            if best_key is None or key < best_key:
-                best_graph, best_key = graph, key
-        best_distance = best_key[1]
-    coupling_map = {edge for u, v in best_graph.edges for edge in [(u, v), (v, u)]}  # bidirectional, no direction reversals
-    arch = SCArchitecture(num_qubits, coupling_map)
-
-    # B) compile with the heuristic (A*) mapper; bidirectional routing passes refine the initial layout
+    # 2.) compile
     config = SCConfiguration()
     config.method = Method.heuristic
     config.heuristic = Heuristic.gate_count_max_distance
     config.initial_layout = InitialLayout.dynamic
     config.iterative_bidirectional_routing = True
-    config.iterative_bidirectional_routing_passes = parameters.get("bidirectional_passes", 10)
+    config.iterative_bidirectional_routing_passes = 10
     config.layering = Layering.individual_gates
     config.lookahead_heuristic = LookaheadHeuristic.gate_count_max_distance
     config.lookaheads = 15
@@ -436,65 +334,45 @@ def run_sc_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[Supercondu
     config.pre_mapping_optimizations = False
     config.post_mapping_optimizations = False
     config.add_measurements_to_mapped_circuit = False
+    config.timeout = int(max_compile_time * 1000)  # ms
     start = time.perf_counter()
-    mapped, results = sc_map(qc, arch, config)
+    mapped, results = sc_map(qc, hardware, config)
     wall_clock_s = time.perf_counter() - start
     if results.timeout:
-        raise RuntimeError("Superconducting qubit mapping timed out.")
+        raise TimeoutError(f"Superconducting qubit compilation did not succeed: TIMEOUT after {max_compile_time}s")
 
-    # C) replay: SWAPs exchange the logical qubits of two physical qubits, anchored by (qubit, number of completed anchor operations)
-    # `mapped.initial_layout` is not reliable with the dynamic layout, so undo the SWAPs on the (correct) output permutation
-    layout = {physical: logical for physical, logical in mapped.output_permutation.items()}  # physical -> logical
+    # 3.) extract events by replaying schedule
+    active = sorted({q for op in qc for q in [ctl.qubit for ctl in op.controls] + list(op.targets)})
+    layout = {physical: active[qubit] for physical, qubit in mapped.output_permutation.items()}  # physical -> circuit qubit
+    layout.update(zip(sorted(set(range(hardware.num_qubits)) - set(layout)), sorted(set(range(qc.num_qubits)) - set(active))))
     for op in reversed(list(mapped)):
         if op.type_ == OpType.swap:
             layout[op.targets[0]], layout[op.targets[1]] = layout[op.targets[1]], layout[op.targets[0]]
-    initial_layout = dict(layout)
     hardware_events = SuperconductingQubitsHardwareEvents()
-    qubit_steps: defaultdict[int, int] = defaultdict(int)
-    replayed_ops: defaultdict[int, list] = defaultdict(list)
-    swaps_per_qubit: Counter[int] = Counter()
-    num_swaps = 0
+    qubit_steps: defaultdict[int, int] = defaultdict(int)  # qubit -> number of completed anchor operations
+    swaps: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> number of swaps that qubit took part in there
     for op in mapped:
         physicals = [ctl.qubit for ctl in op.controls] + list(op.targets)
-        logicals = [layout[p] for p in physicals]
+        qubits = [layout[p] for p in physicals]
         if op.type_ == OpType.swap:
-            num_swaps += 1
-            swaps_per_qubit.update(used_qubits[logical] for logical in logicals)
-            hardware_events.virtual_swap.append(tuple((used_qubits[logical], qubit_steps[logical]) for logical in logicals))
-            layout[physicals[0]], layout[physicals[1]] = logicals[1], logicals[0]
-        elif op.type_ == OpType.x and len(physicals) == 2:  # cx: (control, target)
-            assert best_graph.has_edge(*physicals), "mapped CX on uncoupled qubits"
-            replayed_ops[logicals[0]].append(("cx", logicals[1]))
-            replayed_ops[logicals[1]].append(("cx", logicals[0]))
-            qubit_steps[logicals[0]] += 1
-            qubit_steps[logicals[1]] += 1
+            hardware_events.virtual_swap.append(((qubits[0], qubit_steps[qubits[0]]), (qubits[1], qubit_steps[qubits[1]])))
+            swaps.update((qubit, qubit_steps[qubit]) for qubit in qubits)
+            layout[physicals[0]], layout[physicals[1]] = qubits[1], qubits[0]
+        elif op.type_ == OpType.x and len(physicals) == 2:  # cx (control, target)
+            assert tuple(physicals) in hardware.coupling_map, "mapped CX on uncoupled qubits"
+            qubit_steps[qubits[0]] += 1
+            qubit_steps[qubits[1]] += 1
         elif op.type_ == OpType.rz:  # measurement / reset marker
-            replayed_ops[logicals[0]].append(("rz",))
-            qubit_steps[logicals[0]] += 1
-    if replayed_ops != expected_ops:
+            qubit_steps[qubits[0]] += 1
+    expected_steps = Counter(t.value for op in circuit for group in op.target_groups() for t in group
+                             if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
+                             or stim.gate_data(op.name).is_reset)
+    if {qubit: steps for qubit, steps in qubit_steps.items() if steps} != dict(expected_steps):
         raise RuntimeError("Superconducting qubit schedule replay does not reproduce the anchor operations of the circuit.")
 
-    # D) details
-    swapped_pairs = Counter(frozenset(q for q, _ in swap) for swap in hardware_events.virtual_swap)
     details = {
-        "num_swaps": num_swaps,  # all inserted SWAPs (each = 3 CX on hardware); here every SWAP is between two circuit qubits
-        "num_swaps_reported": results.output.swaps,  # QMAP's own count (should equal num_swaps)
-        "num_cx_input": results.input_.cnots,
-        "num_cx_output": results.output.cnots,  # incl. 3 per SWAP
-        "swaps_per_qubit": dict(swaps_per_qubit),  # stim qubit -> number of SWAPs it took part in
-        "swapped_pairs": {tuple(sorted(pair)): count for pair, count in swapped_pairs.items()},  # stim qubit pair -> count
-        "depth_input": qc.depth(),
-        "depth_output": mapped.depth(),
-        "initial_layout": {used_qubits[logical]: physical for physical, logical in initial_layout.items()},  # stim qubit -> physical
-        "final_layout": {used_qubits[logical]: physical for physical, logical in layout.items()},
-        "layout": lattice_name,
-        "degrees": dict(best_graph.degree),  # physical qubit -> degree in the used coupling graph
-        "coupling_graph_avg_distance": best_distance,
-        "coupling_graph_diameter": nx.diameter(best_graph),
-        "coupling_map": sorted((u, v) for u, v in best_graph.edges),  # undirected edges
-        "mapper_time_s": results.time,
+        "swaps": dict(sorted(swaps.items())),  # (qubit, completed anchors) -> nr of swaps that qubit took part in there (each swap appears for both qubits)
         "wall_clock_s": wall_clock_s,
-        "mapped_circuit": mapped.qasm3_str(),  # physical qubits; cx/swap/h/rz (rz = measurement/reset marker)
     }
     return hardware_events, details
 

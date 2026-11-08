@@ -1,0 +1,4 @@
+platform: SC
+name: "Rigetti Aspen"
+architecture:
+  topology: "octagonal"

@@ -1,5 +1,10 @@
 """Constructs specific hardware."""
 
+import math
+from collections import Counter
+
+import networkx as nx
+
 from src.models.hardware import ( TrappedIonsModel, NeutralAtomsModel, SuperconductingQubitsModel)
 from mqt.ionshuttler.linear import Architecture as TIArchitecture
 from mqt.qmap.sc import Architecture as SCArchitecture
@@ -8,7 +13,7 @@ from mqt.qmap.na.zoned import ZonedNeutralAtomArchitecture
 def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsModel, TIArchitecture | dict]:
     """Construct a trapped ion architecture as the abstract model and the concrete MQT IonShuttler hardware.
 
-    parameters: `topology` ("linear" | "ring" | "grid"), `nr_zones`, plus
+    parameters: `topology` ("linear" | "ring" | "grid"), `nr_zones`
       - linear: `zone_capacity`, optional `storage_slack` (1)
       - ring:   fixed 2 x 2 junctions
       - grid:   optional `grid_size` ([3, 3])
@@ -32,7 +37,7 @@ def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsM
         concrete_hardware = {"arch": [m, n, segment_length, segment_length], "num_pzs": nr_zones, "seed": parameters.get("seed", 0)}
 
     else:
-        raise ValueError(f"Unknown trapped ion architecture {parameters['topology']!r} (linear, ring, grid).")
+        raise ValueError(f"Unsupported trapped ion architecture {parameters['topology']!r} (linear, ring, grid).")
 
     abstract_model = TrappedIonsModel(interaction_zone_capacity=capacity, nr_interaction_sites=nr_zones)
     return abstract_model, concrete_hardware
@@ -43,6 +48,58 @@ def prepare_na_hardware(parameters: dict) -> tuple[NeutralAtomsModel, ZonedNeutr
 
 
 
-def prepare_sc_hardware(parameters: dict) -> tuple[SuperconductingQubitsModel, SCArchitecture]:
-    abstract_model = SuperconductingQubitsModel(number_of_qubits=parameters["number_of_qubits"], gate_durations=parameters["gate_durations"], topology=parameters["topology"])
-    return abstract_model, None
+def prepare_sc_hardware(parameters: dict, num_qubits: int) -> tuple[SuperconductingQubitsModel, SCArchitecture]:
+    """Construct a superconducting qubit architecture as the abstract model and the concrete MQT QMAP hardware.
+
+    parameters: `topology` ("square" | "hex" | "heavy_hex" | "octagonal")
+    """
+    # underlying (technically infinite) lattice
+    side = math.ceil(math.sqrt(num_qubits)) + 3
+    if parameters["topology"] == "square":
+        lattice = nx.grid_2d_graph(side, side)
+        nx.set_node_attributes(lattice, {node: node for node in lattice}, "pos")
+    elif parameters["topology"] == "hex": 
+        lattice = nx.hexagonal_lattice_graph(side, side)
+    elif parameters["topology"] == "heavy_hex":
+        hexagons = nx.hexagonal_lattice_graph(side, side)
+        lattice = nx.Graph()
+        lattice.add_nodes_from(hexagons.nodes(data=True))
+        for u, v in hexagons.edges:
+            (ux, uy), (vx, vy) = hexagons.nodes[u]["pos"], hexagons.nodes[v]["pos"]
+            lattice.add_node((u, v), pos=((ux + vx) / 2, (uy + vy) / 2))
+            lattice.add_edges_from([(u, (u, v)), ((u, v), v)])
+    elif parameters["topology"] == "octagonal":
+        lattice = nx.Graph()
+        for row in range(side):
+            for col in range(side):
+                for i in range(8):
+                    angle = (i + 0.5) * math.pi / 4
+                    lattice.add_node((row, col, i), pos=(3 * col + math.cos(angle), 3 * row + math.sin(angle)))
+                    lattice.add_edge((row, col, i), (row, col, (i + 1) % 8))
+                if col > 0:
+                    lattice.add_edges_from([((row, col - 1, 0), (row, col, 3)), ((row, col - 1, 7), (row, col, 4))])
+                if row > 0:
+                    lattice.add_edges_from([((row - 1, col, 1), (row, col, 6)), ((row - 1, col, 2), (row, col, 5))])
+    else:
+        raise ValueError(f"Unsupported superconducting architecture {parameters['topology']!r} (square, hex, heavy_hex, octagonal).")
+
+    # build finite chip layout based on num_qubits and infinite lattice
+    pos = nx.get_node_attributes(lattice, "pos")
+    centroid = [sum(p[k] for p in pos.values()) / len(pos) for k in (0, 1)]
+    chip, best_key = None, None
+    for start in sorted(lattice, key=lambda node: (math.dist(pos[node], centroid), str(node)))[:24]:
+        patch = [start]
+        while len(patch) < num_qubits:
+            frontier = {n for node in patch for n in lattice[node]} - set(patch)
+            patch_centroid = [sum(pos[node][k] for node in patch) / len(patch) for k in (0, 1)]
+            patch.append(min(frontier, key=lambda node: (-sum(n in patch for n in lattice[node]),
+                                                         round(math.dist(pos[node], patch_centroid), 6), str(node))))
+        graph = nx.relabel_nodes(lattice.subgraph(patch), {node: i for i, node in enumerate(patch)})  # connected
+        key = (-graph.number_of_edges(), nx.average_shortest_path_length(graph) if num_qubits > 1 else 0.0)
+        if best_key is None or key < best_key:
+            chip, best_key = graph, key
+
+    concrete_hardware = SCArchitecture(num_qubits, {edge for u, v in chip.edges for edge in [(u, v), (v, u)]})  # bidirectional
+    abstract_model = SuperconductingQubitsModel(number_of_qubits=num_qubits, topology=dict(Counter(d for _, d in chip.degree)),
+                                                gate_durations={"SN": 1, "MS": 1, "EN": 1})
+    return abstract_model, concrete_hardware

@@ -9,7 +9,7 @@ from pathlib import Path
 import stim
 import yaml
 
-from benchmarks.model_accuracy.compilation import run_ti_compiler, run_na_compiler, run_sc_compiler, run_ti_abstraction
+from benchmarks.model_accuracy.compilation import run_ti_compiler, run_na_compiler, run_sc_compiler, run_ti_abstraction, run_sc_abstraction
 from benchmarks.model_accuracy.architecture_preparation import prepare_ti_hardware, prepare_na_hardware, prepare_sc_hardware
 from benchmarks.model_accuracy.visualization import visualize
 
@@ -49,10 +49,10 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
     for config in configs:
         if config["platform"] == "TI":
             for circuit_name, circuit in circuits.items():
-                # anchors per qubit: 2q gates, measurements and resets (MR counts as one anchor, as in TrappedIonsModel)
                 anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
                                   if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
                                   or stim.gate_data(op.name).is_reset)
+                
                 abstract_hardware, concrete_hardware = prepare_ti_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
 
                 print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
@@ -74,7 +74,28 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
         elif config["platform"] == "NA":
             pass
         elif config["platform"] == "SC":
-            pass
+            for circuit_name, circuit in circuits.items():
+                anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
+                                  if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
+                                  or stim.gate_data(op.name).is_reset)
+                
+                abstract_hardware, concrete_hardware = prepare_sc_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
+
+                print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
+                abstract_hardware_events, abstraction_details = run_sc_abstraction(hardware=abstract_hardware, circuit=circuit)
+                print(f"[{config["platform"]}] Running compilation of        {circuit_name} on ({config["name"]})...")
+                try:
+                    concrete_hardware_events, compiler_details = run_sc_compiler(hardware=concrete_hardware, circuit=circuit, max_compile_time=max_compile_time)
+                except (RuntimeError, TimeoutError) as error:
+                    print(f"Skipped {config['name']} / {circuit_name}: {error}")
+                    continue
+
+                metadata = {"config": config["name"], "platform": config["platform"], **config["architecture"],
+                            "circuit": circuit_name, "num_qubits": circuit.num_qubits}
+                save_raw_results(_RESULTS_DIR / "sc" / "raw" / f"{config['name']}__{circuit_name}.csv", metadata,
+                                 anchors={qubit: anchors[qubit] for qubit in range(circuit.num_qubits)},
+                                 abstract=(abstract_hardware_events, abstraction_details),
+                                 compiled=(concrete_hardware_events, compiler_details))
         else:
             print(f"Unsupported platform: {config["platform"]}")
 
@@ -99,8 +120,9 @@ def save_raw_results(file: Path, metadata: dict, anchors: dict[int, int], abstra
             writer.writerow([*metadata.values(), "circuit", "anchors", qubit, "", "", num_anchors])
         for source, (events, details) in {"abstract": abstract, "compiled": compiled}.items():
             for metric, locations in vars(events).items():
-                for qubit, anchor in locations:
-                    writer.writerow([*metadata.values(), source, metric, qubit, anchor, 1, ""])
+                for location in locations:  # a location, or a pair of locations (SC virtual_swap: one row per swapped qubit)
+                    for qubit, anchor in (location if isinstance(location[0], tuple) else [location]):
+                        writer.writerow([*metadata.values(), source, metric, qubit, anchor, 1, ""])
             for metric, value in details.items():
                 if isinstance(value, dict):
                     for (qubit, anchor), count in value.items():

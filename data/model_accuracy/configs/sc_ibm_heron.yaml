@@ -1,0 +1,4 @@
+platform: SC
+name: "IBM Heron"
+architecture:
+  topology: "heavy_hex"

@@ -1,0 +1,4 @@
+platform: SC
+name: "Hexagonal"
+architecture:
+  topology: "hex"

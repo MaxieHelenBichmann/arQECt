@@ -1,0 +1,4 @@
+platform: SC
+name: "Google Willow"
+architecture:
+  topology: "square"
