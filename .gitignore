@@ -36,3 +36,6 @@ playground/
 # Generated outputs (benchmarks, compiler comparisons, plots)
 results/*
 !results/.gitkeep
+!results/model_accuracy/
+results/model_accuracy/*
+!results/model_accuracy/.gitkeep
