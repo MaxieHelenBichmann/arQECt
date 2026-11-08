@@ -1,0 +1,5 @@
+platform: TI
+architecture:
+  topology: "linear"
+  nr_zones: 1
+  zone_capacity: 3

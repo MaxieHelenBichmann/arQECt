@@ -1,0 +1,4 @@
+platform: TI
+architecture:
+  topology: "ring"
+  nr_zones: 2

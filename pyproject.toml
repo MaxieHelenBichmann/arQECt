@@ -10,6 +10,7 @@ dependencies = [
     "mqt-qmap==3.11.0",
     "networkx==3.7",
     "numpy==2.5.4",
+    "pyyaml>=6.0.3",
     "stim==1.16.0",
 ]
 

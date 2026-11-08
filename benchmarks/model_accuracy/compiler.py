@@ -41,17 +41,11 @@ from src.models.hardware import ( TrappedIonsModel, TrappedIonsHardwareEvents, N
 
 
 
-def run_ti_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[TrappedIonsHardwareEvents, dict]: # (proxy information, details)
-    """Run the trapped ion compiler (MQT IonShuttler) on the given circuit, for a named architecture.
+def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[TrappedIonsHardwareEvents, dict]: # (proxy information, details)
+    """Run the trapped ion compiler (MQT IonShuttler) on the given circuit, for hardware from `prepare_ti_hardware`.
 
-    parameters["architecture"]:
-      - "linear" (Quantinuum H1 style): one linear trap, `nr_zones` gate zones of `zone_capacity` sites inside the chain,
-        with storage in between; compiled with the `linear` compiler (A* search, one ion per site).
-      - "ring" (Quantinuum Helios style): a storage loop of four trap segments (`segment_length` ions each) joined by junctions,
-        with `nr_zones` (1-4) gate zones attached outside via junction legs; compiled with `multi_shuttler` (heuristic).
-      - "grid" (2D QCCD, e.g. Quantinuum's planned grid devices): `grid_size` (m, n) junctions connected by trap segments,
-        with `nr_zones` (1-4) gate zones attached at the sides; compiled with `multi_shuttler`.
-    In `multi_shuttler`, a gate zone holds at most 2 ions (hardcoded). Both compilers use their default initial placement.
+    A `linear` Architecture is compiled with the `linear` compiler (A* search, bounded by `max_compile_time`), a
+    `multi_shuttler` config (ring / grid) with `multi_shuttler` (heuristic). Both use their default initial placement.
 
     Translation is 1:1 (one stim target group -> one native op), only the interaction structure matters for shuttling:
     2q gates -> Rzz, measurements/resets (anchors) -> Rx, other 1q gates -> Ry (all physical, i.e. need the ion in a zone).
@@ -72,16 +66,11 @@ def run_ti_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[TrappedIon
 
     hardware_events = TrappedIonsHardwareEvents()
     qubit_steps: defaultdict[int, int] = defaultdict(int)  # ion -> number of completed anchor operations
-    num_qubits, nr_zones = circuit.num_qubits, parameters["nr_zones"]
+    num_qubits = circuit.num_qubits
 
-    if parameters["architecture"] == "linear":
-        # [storage][zone][storage]...[zone][storage] on one chain, one ion per site
-        capacity = parameters["zone_capacity"]
-        storage_size = -(-num_qubits // (nr_zones + 1)) + parameters.get("storage_slack", 1)
-        zones = {f"iz{z}": list(range(storage_size + z * (capacity + storage_size), (z + 1) * (capacity + storage_size))) for z in range(nr_zones)}
-        arch = TIArchitecture(num_sites=storage_size + nr_zones * (capacity + storage_size), processing_zones=zones)
-
-        config = LinearCompilerConfig(search=SearchConfig(max_compile_time=parameters.get("max_compile_time", 600.0)))
+    if isinstance(hardware, TIArchitecture):
+        arch = hardware
+        config = LinearCompilerConfig(search=SearchConfig(max_compile_time=max_compile_time))
         result = LinearCompiler(arch, config=config).compile(qc)
         if result.status is not CompilationStatus.SUCCESS:
             raise RuntimeError(f"Trapped ion compilation did not succeed: {result.status}")
@@ -117,13 +106,9 @@ def run_ti_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[TrappedIon
             "result": result,  # full CompilationResult (result.path holds the ordered actions; ion = stim qubit index)
         }
 
-    elif parameters["architecture"] in ("ring", "grid"):
-        # junction grid [m, n, v, h]: m x n junctions, v / h ions per vertical / horizontal trap segment; a ring is 2 x 2
-        m, n = (2, 2) if parameters["architecture"] == "ring" else parameters.get("grid_size", (3, 3))
-        nr_segments = m * (n - 1) + n * (m - 1)
-        segment_length = parameters.get("segment_length", -(-2 * num_qubits // nr_segments))  # default: ~half filled
-        config = {"arch": [m, n, segment_length, segment_length], "num_pzs": nr_zones, "algorithm_name": "circuit",
-                  "abs_num_ions": num_qubits, "seed": parameters.get("seed", 0)}
+    else:
+        # multi_shuttler reads the circuit from <qasm_base_dir>/<algorithm_name>/<algorithm_name>_<num_ions>.qasm
+        config = {**hardware, "algorithm_name": "circuit", "abs_num_ions": num_qubits}
 
         # multi_shuttler only reports the number of timesteps, so record its per-timestep ion positions (ion -> trap edge)
         # and its finished gates by temporarily wrapping the two functions its scheduling loop calls for that
@@ -184,9 +169,6 @@ def run_ti_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[TrappedIon
             "nr_trap_edges": sum(1 for *_, t in graph.edges(data="edge_type") if t == "trap"),
             "initial_positions": dict(sorted(timeline[0][2].items())),  # ion -> trap edge
         }
-
-    else:
-        raise ValueError(f"Unknown trapped ion architecture {parameters['architecture']!r} (linear, ring, grid).")
 
     expected_steps = Counter(t.value for op in circuit for group in op.target_groups() for t in group
                              if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
