@@ -2,4 +2,4 @@ platform: TI
 architecture:
   topology: "grid"
   nr_zones: 4
-  grid_size: [3, 3]
+  grid_size: [2, 3]

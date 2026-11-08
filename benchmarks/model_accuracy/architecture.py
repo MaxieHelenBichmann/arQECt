@@ -6,19 +6,13 @@ from mqt.qmap.sc import Architecture as SCArchitecture
 from mqt.qmap.na.zoned import ZonedNeutralAtomArchitecture
 
 def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsModel, TIArchitecture | dict]:
-    """Construct a named trapped ion architecture: the abstract model and the concrete MQT IonShuttler hardware.
+    """Construct a trapped ion architecture as the abstract model and the concrete MQT IonShuttler hardware.
 
-    parameters["topology"]:
-      - "linear" (Quantinuum H1 style): one linear trap, `nr_zones` gate zones of `zone_capacity` sites inside the chain, with
-        storage in between (`storage_slack` extra free sites per storage segment, default 1). Concrete: `linear` Architecture
-        (one ion per site).
-      - "ring" (Quantinuum Helios style): a storage loop of four trap segments (`segment_length` ions each) joined by junctions,
-        with `nr_zones` (1-4) gate zones attached outside via junction legs. Concrete: `multi_shuttler` config.
-      - "grid" (2D QCCD, e.g. Quantinuum's planned grid devices): `grid_size` (m, n) junctions connected by trap segments, with
-        `nr_zones` (1-4) gate zones attached at the sides. Concrete: `multi_shuttler` config.
-
-    Abstract: nr_interaction_sites = number of gate zones; interaction_zone_capacity = sites per zone ("linear"), or 2 for
-    "ring" / "grid" (a multi_shuttler gate zone holds at most 2 ions, hardcoded). The topology itself is not modelled abstractly.
+    parameters: `topology` ("linear" | "ring" | "grid"), `nr_zones`, plus
+      - linear: `zone_capacity`, optional `storage_slack` (1)
+      - ring:   fixed 2 x 2 junctions
+      - grid:   optional `grid_size` ([3, 3])
+      - ring / grid: optional `segment_length` (~half filled), `seed` (0); fixed zone capacity 2, `nr_zones` 1-4
     """
     nr_zones = parameters["nr_zones"]
 
@@ -34,7 +28,7 @@ def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsM
         capacity = 2
         m, n = (2, 2) if parameters["topology"] == "ring" else parameters.get("grid_size", (3, 3))
         nr_segments = m * (n - 1) + n * (m - 1)
-        segment_length = parameters.get("segment_length", -(-2 * num_qubits // nr_segments))  # default: ~half filled
+        segment_length = parameters.get("segment_length", -(-2 * num_qubits // nr_segments))
         concrete_hardware = {"arch": [m, n, segment_length, segment_length], "num_pzs": nr_zones, "seed": parameters.get("seed", 0)}
 
     else:
