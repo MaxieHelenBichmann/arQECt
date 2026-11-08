@@ -108,7 +108,9 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
 
         timeline: list = []  # ("positions", graph, {ion: edge}) | ("gates", graph, [gate ids])
         get_ions, remove_processed_gates = ms_shuttle.get_ions, ms_shuttle.remove_processed_gates
-        def record_positions(graph):
+        def record_positions(graph):  # called every timestep, so it also enforces max_compile_time (multi_shuttler has no time limit)
+            if time.perf_counter() > start + max_compile_time:
+                raise TimeoutError(f"Trapped ion compilation did not succeed: TIMEOUT after {max_compile_time}s")
             positions = get_ions(graph)
             timeline.append(("positions", graph, positions))
             return positions
