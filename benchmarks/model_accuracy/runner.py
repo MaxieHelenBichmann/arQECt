@@ -18,7 +18,8 @@ _CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" /
 _RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "model_accuracy"
 
 def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_pattern: str = "*",
-        max_qubits: int | None = None, max_compile_time: float = 600.0, visualize_true: bool = True, clean: bool = False) -> None:
+        max_qubits: int | None = None, max_compile_time: float = 600.0, visualize_true: bool = True, clean: bool = False,
+        append: bool = False) -> None:
     # empty the raw result directories of the platforms that are run (so only results of this run remain)
     if clean:
         for platform in platforms or ["TI", "NA", "SC"]:
@@ -49,6 +50,10 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
     for config in configs:
         if config["platform"] == "TI":
             for circuit_name, circuit in circuits.items():
+                if append and (_RESULTS_DIR / "ti" / "raw" / f"{config['name']}__{circuit_name}.csv").exists():
+                    print(f"[{config["platform"]}] Skipping {circuit_name} on ({config["name"]}): raw result already exists")
+                    continue
+
                 anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
                                   if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
                                   or stim.gate_data(op.name).is_reset)
@@ -75,6 +80,10 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
             pass
         elif config["platform"] == "SC":
             for circuit_name, circuit in circuits.items():
+                if append and (_RESULTS_DIR / "sc" / "raw" / f"{config['name']}__{circuit_name}.csv").exists():
+                    print(f"[{config["platform"]}] Skipping {circuit_name} on ({config["name"]}): raw result already exists")
+                    continue
+
                 anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
                                   if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
                                   or stim.gate_data(op.name).is_reset)
@@ -144,8 +153,10 @@ if __name__ == "__main__":
     parser.add_argument("--no-visualize", action="store_true", help="only write the raw results, no plots")
     parser.add_argument("--clean", action="store_true",
                         help="delete all files in the raw result directories of the run platforms before running")
+    parser.add_argument("--append", action="store_true",
+                        help="skip circuit/config combinations whose raw result file already exists")
     args = parser.parse_args()
 
     run(platforms=args.platform, circuit_pattern=args.circuits, config_pattern=args.configs, max_qubits=args.max_qubits,
-        max_compile_time=args.max_compile_time, visualize_true=not args.no_visualize, clean=args.clean)
+        max_compile_time=args.max_compile_time, visualize_true=not args.no_visualize, clean=args.clean, append=args.append)
 
