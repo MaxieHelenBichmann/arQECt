@@ -19,7 +19,11 @@ _RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "model_accuracy
 
 def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_pattern: str = "*",
         max_qubits: int | None = None, max_compile_time: float = 600.0, visualize_true: bool = True, clean: bool = False,
-        append: bool = False) -> None:
+        append: bool = False, only_visual: bool = False) -> None:
+    if only_visual:
+        visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits)
+        return
+
     # empty the raw result directories of the platforms that are run (so only results of this run remain)
     if clean:
         for platform in platforms or ["TI", "NA", "SC"]:
@@ -180,8 +184,11 @@ if __name__ == "__main__":
                         help="delete all files in the raw result directories of the run platforms before running")
     parser.add_argument("--append", action="store_true",
                         help="skip circuit/config combinations whose raw result file already exists")
+    parser.add_argument("--only-visual", action="store_true",
+                        help="skip running, only visualize the existing raw results of the selected platforms")
     args = parser.parse_args()
 
     run(platforms=args.platform, circuit_pattern=args.circuits, config_pattern=args.configs, max_qubits=args.max_qubits,
-        max_compile_time=args.max_compile_time, visualize_true=not args.no_visualize, clean=args.clean, append=args.append)
+        max_compile_time=args.max_compile_time, visualize_true=not args.no_visualize, clean=args.clean, append=args.append,
+        only_visual=args.only_visual)
 
