@@ -2,8 +2,8 @@
 
 import contextlib
 import io
-import json
 import math
+import multiprocessing
 import os
 import random
 import re
@@ -173,64 +173,54 @@ def run_ti_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, max_
     return hardware_events, details
 
 
-def run_na_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[NeutralAtomsHardwareEvents, dict]:
-    """Run the neutral atom compiler (MQT QMAP zoned, storage + entanglement zone) on the given circuit.
-
-    The MQT zoned compiler only supports CZ + 1q gates and has no readout zone / measurements, so the translation is 1:1 on the
-    interaction structure: 2q gates -> CZ, measurements/resets (anchors) -> RZ (used as a marker, 1q gates are neither fused nor
-    reordered per qubit), other 1q gates -> H. Consequently `storage_readout` / `entanglement_readout` stay empty and
-    `readout_zone_capacity` is ignored. Note that the compiler executes 1q gates in place (also inside the entanglement zone).
-    Zone crossings are reconstructed by replaying the .naviz schedule, anchored like in `NeutralAtomsModel`.
-    """
-    # translate stim -> mqt, compacting unused qubit indices (every index would become a physical atom)
-    used_qubits = sorted({t.value for op in circuit for t in op.targets_copy() if t.is_qubit_target})
-    to_atom = {qubit: atom for atom, qubit in enumerate(used_qubits)}
-    qc = QuantumComputation(len(used_qubits))
-    expected_steps: Counter[int] = Counter()  # atom -> number of anchor operations in the circuit (sanity check of the replay)
+def run_na_compiler(hardware: ZonedNeutralAtomArchitecture, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[NeutralAtomsHardwareEvents, dict]:
+    """Run the neutral atom compiler (MQT QMAP zoned, routing-aware) on the given circuit and given hardware architecture."""
+    # 1.) 1-to-1 transpilation (one stim target group -> one native op) and format change (stim -> mqt)
+    qc = QuantumComputation(circuit.num_qubits)
     for op in circuit:
         data = stim.gate_data(op.name)
-        if not (data.is_unitary or data.produces_measurements or data.is_reset):
-            continue  # TICK, DETECTOR, noise channels, ...
         for group in op.target_groups():
-            atoms = [to_atom[t.value] for t in group]
+            atoms = [t.value for t in group]
             if data.is_two_qubit_gate:
                 qc.cz(*atoms)
-                expected_steps.update(atoms)
             elif data.produces_measurements or data.is_reset:  # MR counts as one anchor, as in NeutralAtomsModel
                 qc.rz(1.0, *atoms)
-                expected_steps.update(atoms)
             else:
                 qc.h(*atoms)
 
-    # architecture: storage SLM grid (sep 3), below it one row of `entanglement_zone_capacity` CZ sites (two SLMs, 2 apart, sep 12)
-    capacity, num_atoms = parameters["entanglement_zone_capacity"], len(used_qubits)
-    storage_cols = max(4 * capacity, math.ceil(math.sqrt(parameters.get("storage_factor", 2) * num_atoms)))  # ~ as wide as the EZ
-    storage_rows = math.ceil(parameters.get("storage_factor", 2) * num_atoms / storage_cols)
-    ez_x, ez_y, ez_sep = 0, 3 * storage_rows + 20, 12
-    arch_spec = {
-        "name": f"na_ez{capacity}_q{num_atoms}",
-        "operation_duration": {"rydberg_gate": 0.36, "single_qubit_gate": 52, "atom_transfer": 15},
-        "operation_fidelity": {"rydberg_gate": 0.995, "single_qubit_gate": 0.9997, "atom_transfer": 0.999},
-        "qubit_spec": {"T": 1.5e6},
-        "storage_zones": [{"zone_id": 0, "offset": [0, 0], "dimension": [3 * storage_cols, 3 * storage_rows],
-                           "slms": [{"id": 0, "site_separation": [3, 3], "r": storage_rows, "c": storage_cols, "location": [0, 0]}]}],
-        "entanglement_zones": [{"zone_id": 0, "offset": [ez_x, ez_y], "dimension": [ez_sep * capacity, 10],
-                                "slms": [{"id": 1, "site_separation": [ez_sep, 10], "r": 1, "c": capacity, "location": [ez_x, ez_y]},
-                                         {"id": 2, "site_separation": [ez_sep, 10], "r": 1, "c": capacity, "location": [ez_x + 2, ez_y]}]}],
-        "aods": [{"id": 0, "site_separation": 2, "r": 100, "c": 100}],
-        "rydberg_range": [[[ez_x - 2, ez_y - 2], [ez_x + ez_sep * capacity, ez_y + 2]]],
-    }
-    arch = ZonedNeutralAtomArchitecture.from_json_string(json.dumps(arch_spec))
-
-    # compile (all atoms start in the storage zone, as in NeutralAtomsModel); max_filling_factor=1 to allow using every CZ site
-    compiler_cls = RoutingAgnosticCompiler if parameters.get("na_compiler") == "routing_agnostic" else RoutingAwareCompiler
-    compiler = compiler_cls(arch, log_level="W", max_filling_factor=1.0)
+    # 2.) compile (all atoms start in the storage zone)
+    def compile_in_child(connection) -> None: # enable compilation timeout
+        try:
+            connection.send(RoutingAwareCompiler(hardware, log_level="E", max_filling_factor=1.0).compile(qc))
+        except Exception as error:
+            connection.send(error)
+    receiver, sender = multiprocessing.Pipe(duplex=False)
+    child = multiprocessing.get_context("fork").Process(target=compile_in_child, args=(sender,))
     start = time.perf_counter()
-    naviz = compiler.compile(qc)
+    child.start()
+    if not receiver.poll(max_compile_time):
+        child.kill()
+        raise TimeoutError(f"Neutral atom compilation did not succeed: TIMEOUT after {max_compile_time}s")
+    naviz = receiver.recv()
     wall_clock_s = time.perf_counter() - start
+    child.join()
+    if isinstance(naviz, Exception):
+        raise RuntimeError(f"Neutral atom compilation did not succeed: {naviz}")
 
-    # parse .naviz into (op, targets): statements are "atom (x, y) atomN" or "@+ <op> [args] <target | [targets]>",
-    # where a target is "atomN" or "(x, y) atomN" (move), and multi-line "[ ... ]" lists are joined into one statement
+    # 3.) extract events by replaying schedule
+    machine = hardware.to_namachine_string()
+    zones = {name: tuple(map(float, corners)) for name, *corners in
+             re.findall(r"zone (\w+) \{\s*from: \(([-\d.]+), ([-\d.]+)\)\s*to: \(([-\d.]+), ([-\d.]+)\)", machine)}
+    def zone_of(pos: tuple[float, float]) -> str | None: 
+        return next((name for name, (x0, y0, x1, y1) in zones.items() if x0 <= pos[0] <= x1 and y0 <= pos[1] <= y1), None)
+    ez_traps = [(x, y) for x, y in ((float(x), float(y)) for x, y in re.findall(r"position: \(([-\d.]+), ([-\d.]+)\)", machine)) if zone_of((x, y))]
+    def site_of(pos: tuple[float, float]) -> tuple[float, float] | None: 
+        if zone_of(pos) is None:
+            return None
+        trap = min(ez_traps, key=lambda t: math.dist(t, pos))
+        partner = min((t for t in ez_traps if t != trap and zone_of(t) == zone_of(trap)), key=lambda t: math.dist(t, trap))
+        return min(trap, partner)
+
     instructions, statement = [], ""
     for line in naviz.splitlines():
         statement += " " + line.strip()
@@ -238,64 +228,67 @@ def run_na_compiler(parameters: dict, circuit: stim.Circuit) -> tuple[NeutralAto
             words = statement.split()
             targets = [(int(a), (float(x), float(y)) if x else None)
                        for x, y, a in re.findall(r"(?:\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)\s*)?\batom(\d+)\b", statement)]
-            instructions.append((words[0] if words[0] == "atom" else words[1], targets))
+            instructions.append((words[0] if words[0] == "atom" else words[1], targets, statement))
             statement = ""
 
-    # replay schedule: zone crossings per atom transport (load ... store), anchored by (qubit, number of completed anchor operations)
-    def location(pos: tuple[float, float]) -> tuple[str, int | None]:  # (zone, CZ site index or None)
-        return ("entanglement", int((pos[0] - ez_x) // ez_sep)) if pos[1] >= ez_y - 1 else ("storage", None)
-
     hardware_events = NeutralAtomsHardwareEvents()
-    qubit_steps: defaultdict[int, int] = defaultdict(int)
+    qubit_steps: defaultdict[int, int] = defaultdict(int)  # atom -> number of completed anchor operations
+    transports: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> number of transports (load ... store) of that atom there
+    zone_changes: Counter[tuple[int, int]] = Counter()  # ... of which between storage and an entanglement zone
+    site_changes: Counter[tuple[int, int]] = Counter()  # ... of which between two different CZ sites (also across entanglement zones)
+    storage_moves: Counter[tuple[int, int]] = Counter()  # ... of which within the storage zone
+    move_distance: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> distance (um) the atom travelled there
     positions: dict[int, tuple[float, float]] = {}
-    in_aod: dict[int, tuple[float, float]] = {}  # atom -> position it was picked up from
-    transitions: Counter[str] = Counter()
-    op_counts: Counter[str] = Counter()
-    num_jobs = num_cz_gates = 0
-    for op, targets in instructions:
-        op_counts[op] += 1
+    picked_up_at: dict[int, tuple[float, float]] = {}  # atoms currently in the AOD -> where they were picked up
+    rearrangement_jobs = 0
+    for op, targets, statement in instructions:
         if op == "atom":
             positions.update(targets)
         elif op == "load":
-            num_jobs += not in_aod  # a rearrangement job = one AOD pick-up until the AOD is empty again
-            in_aod.update((atom, positions[atom]) for atom, _ in targets)
+            rearrangement_jobs += not picked_up_at
+            picked_up_at.update((atom, positions[atom]) for atom, _ in targets)
         elif op == "move":
-            positions.update(targets)
+            for atom, pos in targets:
+                move_distance[(atom, qubit_steps[atom])] += math.dist(positions[atom], pos)
+                positions[atom] = pos
         elif op == "store":
             for atom, _ in targets:
-                (zone_src, site_src), (zone_dst, site_dst) = location(in_aod.pop(atom)), location(positions[atom])
-                transitions[f"{zone_src}->{zone_dst}" + ("(same site)" if zone_src == zone_dst == "entanglement" and site_src == site_dst else "")] += 1
-                anchor = (used_qubits[atom], qubit_steps[atom])
-                if zone_src != zone_dst:
+                src, dst = site_of(picked_up_at.pop(atom)), site_of(positions[atom])
+                anchor = (atom, qubit_steps[atom])
+                transports[anchor] += 1
+                if (src is None) != (dst is None):
+                    zone_changes[anchor] += 1
                     hardware_events.storage_entanglement.append(anchor)
-                elif zone_src == "entanglement" and site_src != site_dst:
+                elif src is None:
+                    storage_moves[anchor] += 1
+                elif src != dst:
+                    site_changes[anchor] += 1
                     hardware_events.inter_entanglement.append(anchor)
-        elif op == "cz":
-            sites = Counter(location(pos) for atom, pos in positions.items() if atom not in in_aod)
-            for atom, pos in positions.items():
-                if atom not in in_aod and location(pos)[0] == "entanglement" and sites[location(pos)] == 2:
+        elif op == "cz": 
+            pulsed = {name for name in zones if re.search(rf"\b{name}\b", statement)}
+            stored = {atom: site_of(pos) for atom, pos in positions.items() if atom not in picked_up_at and zone_of(pos) in pulsed}
+            occupancy = Counter(stored.values())
+            for atom, site in stored.items():
+                if occupancy[site] == 2:
                     qubit_steps[atom] += 1
-                    num_cz_gates += 0.5
-        elif op == "rz":  # measurement / reset marker
+        elif op == "rz": 
             for atom, _ in targets:
                 qubit_steps[atom] += 1
-    if dict(qubit_steps) != {atom: steps for atom, steps in expected_steps.items() if steps}:
+
+    expected_steps = Counter(t.value for op in circuit for group in op.target_groups() for t in group
+                             if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
+                             or stim.gate_data(op.name).is_reset)
+    if {qubit: steps for qubit, steps in qubit_steps.items() if steps} != dict(expected_steps):
         raise RuntimeError("Neutral atom schedule replay does not reproduce the anchor operations of the circuit.")
 
-    num_atom_transports = sum(transitions.values())
     details = {
-        "op_counts": dict(op_counts),  # raw .naviz instructions: load, move, store, cz (stages), rz (anchor markers), u (other 1q)
-        "transitions": dict(transitions),  # per-atom transports by (source zone -> destination zone)
-        "num_atom_transports": num_atom_transports,  # one atom picked up, moved, and dropped off
-        "num_trap_transfers": 2 * num_atom_transports,  # SLM <-> AOD transfers (one load + one store per transport)
-        "num_rearrangement_jobs": num_jobs,  # parallel AOD jobs (pick-up until the AOD is empty again)
-        "num_move_instructions": op_counts["move"],  # raw AOD move steps (each job uses several)
-        "num_cz_stages": op_counts["cz"],  # Rydberg pulses
-        "num_cz_gates": int(num_cz_gates),
-        "compiler_stats": compiler.stats(),  # internal timings in µs
+        "transports": dict(sorted(transports.items())),  # (qubit, completed anchors) -> nr of atom transports (pick-up, move, drop-off) there
+        "zone_changes": dict(sorted(zone_changes.items())),  # ... of which storage <-> entanglement zone
+        "entanglement_site_changes": dict(sorted(site_changes.items())),  # ... of which between different CZ sites
+        "storage_moves": dict(sorted(storage_moves.items())),  # ... of which within the storage zone (rearrangements)
+        "move_distance": dict(sorted(move_distance.items())),  # (qubit, completed anchors) -> distance (um) the atom travelled there
+        "rearrangement_jobs": rearrangement_jobs,  # parallel AOD jobs (all atoms moved together count once)
         "wall_clock_s": wall_clock_s,
-        "architecture": arch_spec,
-        "naviz": naviz,  # full compiled schedule (atomN = compacted qubit index, used_qubits[N] = stim qubit)
     }
     return hardware_events, details
 

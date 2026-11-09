@@ -1,0 +1,6 @@
+platform: NA
+name: "Minimal Zoned"
+architecture:
+  nr_entanglement_zones: 1
+  entanglement_zone_size: [1, 1]
+  readout_zone_size: [1, 2]

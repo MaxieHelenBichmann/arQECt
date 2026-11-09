@@ -9,7 +9,7 @@ from pathlib import Path
 import stim
 import yaml
 
-from benchmarks.model_accuracy.compilation import run_ti_compiler, run_na_compiler, run_sc_compiler, run_ti_abstraction, run_sc_abstraction
+from benchmarks.model_accuracy.compilation import run_ti_compiler, run_na_compiler, run_sc_compiler, run_ti_abstraction, run_na_abstraction, run_sc_abstraction
 from benchmarks.model_accuracy.architecture_preparation import prepare_ti_hardware, prepare_na_hardware, prepare_sc_hardware
 from benchmarks.model_accuracy.visualization import visualize
 
@@ -77,7 +77,32 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
                                  compiled=(concrete_hardware_events, compiler_details))
 
         elif config["platform"] == "NA":
-            pass
+            for circuit_name, circuit in circuits.items():
+                if append and (_RESULTS_DIR / "na" / "raw" / f"{config['name']}__{circuit_name}.csv").exists():
+                    print(f"[{config["platform"]}] Skipping {circuit_name} on ({config["name"]}): raw result already exists")
+                    continue
+
+                anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
+                                  if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
+                                  or stim.gate_data(op.name).is_reset)
+
+                abstract_hardware, concrete_hardware = prepare_na_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
+
+                print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
+                abstract_hardware_events, abstraction_details = run_na_abstraction(hardware=abstract_hardware, circuit=circuit)
+                print(f"[{config["platform"]}] Running compilation of        {circuit_name} on ({config["name"]})...")
+                try:
+                    concrete_hardware_events, compiler_details = run_na_compiler(hardware=concrete_hardware, circuit=circuit, max_compile_time=max_compile_time)
+                except (RuntimeError, TimeoutError) as error:
+                    print(f"Skipped {config['name']} / {circuit_name}: {error}")
+                    continue
+
+                metadata = {"config": config["name"], "platform": config["platform"], **config["architecture"],
+                            "circuit": circuit_name, "num_qubits": circuit.num_qubits}
+                save_raw_results(_RESULTS_DIR / "na" / "raw" / f"{config['name']}__{circuit_name}.csv", metadata,
+                                 anchors={qubit: anchors[qubit] for qubit in range(circuit.num_qubits)},
+                                 abstract=(abstract_hardware_events, abstraction_details),
+                                 compiled=(concrete_hardware_events, compiler_details))
         elif config["platform"] == "SC":
             for circuit_name, circuit in circuits.items():
                 if append and (_RESULTS_DIR / "sc" / "raw" / f"{config['name']}__{circuit_name}.csv").exists():

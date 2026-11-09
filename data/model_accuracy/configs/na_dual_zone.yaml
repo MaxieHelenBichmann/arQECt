@@ -1,0 +1,6 @@
+platform: NA
+name: "Dual Zone"
+architecture:
+  nr_entanglement_zones: 2
+  entanglement_zone_size: [2, 4]
+  readout_zone_size: [2, 4]

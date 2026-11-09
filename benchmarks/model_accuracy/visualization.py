@@ -40,6 +40,11 @@ TI_ION_MOVES = ("shuttles", "swaps")  # swaps are counted per ion
 F1_TOLERANCES = [0, 1, 2, 3]  # allowed anchor offsets of the location agreement
 ON_TIME = 0.25  # a qubit's abstract events are on time if their weight center is within ±ON_TIME anchors of its ion moves
 
+# NA raw result metrics
+NA_ZONE_CHANGES = ("storage_entanglement", "storage_readout", "entanglement_readout", "inter_entanglement")  # abstract events
+NA_COMPARABLE_ZONE_CHANGES = ("storage_entanglement", "inter_entanglement")  # the ones the compiler has (no readout zone)
+NA_ATOM_MOVES = "transports"  # compiled detail: atom pick-up, move, drop-off (any zone)
+
 # SC raw result metrics (one row per swapped qubit, i.e. two per swap)
 SC_SWAPS = "virtual_swap"  # abstract and compiled event
 SC_COMPILED_SWAPS = "swaps"  # compiled detail, the same SWAPs as the compiled virtual_swap events
@@ -63,7 +68,21 @@ def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = N
             visualize_ti_aggregated(config, circuits, file_prefix)
             visualize_ti_distribution(config, circuits, file_prefix)
     if "NA" in platform:
-        pass
+        out_dir = results_dir / "na" / "plots"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        for old_file in out_dir.glob("na_*"):  # remove previous NA outputs (also of configs that no longer have results)
+            old_file.unlink()
+        runs = defaultdict(list)  # config -> the raw rows of each circuit
+        for file in sorted((results_dir / "na" / "raw").glob("*.csv")):
+            with open(file, newline="") as f:
+                rows = list(csv.DictReader(f))
+            if rows and (max_qubits is None or int(rows[0]["num_qubits"]) <= max_qubits):
+                runs[rows[0]["config"]].append(rows)
+        for config, circuits in sorted(runs.items()):
+            file_prefix = f"{out_dir}/na_{re.sub(r'[^a-z0-9]+', '_', config.lower()).strip('_')}"
+            visualize_na_aggregated(config, circuits, file_prefix)
+            visualize_na_distribution(config, circuits, file_prefix)
     if "SC" in platform:
         out_dir = results_dir / "sc" / "plots"
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -445,6 +464,334 @@ def visualize_ti_distribution(config: str, circuits: list[list[dict]], file_pref
     plt.close(fig)
 
     # table of the per-circuit scores (empty = undefined, e.g. no IZ change slot in the circuit)
+    with open(f"{file_prefix}__distribution.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(scores[0]))
+        writer.writeheader()
+        for c in sorted(scores, key=lambda c: c["circuit"]):
+            writer.writerow({k: ("" if isinstance(v, float) and np.isnan(v) else v) for k, v in c.items()})
+
+
+# -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix: str) -> None:
+    """Scatter aggregated abstract vs compiled metrics.
+
+    Each figure compares the aggregated numbers of a certain hardware events.
+    Thus 4 figures per hardware configuration, answering 2 questions:
+
+    A) estimation of zone changes (only the kinds the compiler has: MQT has no readout zone)
+    - number of abstract VS concrete storage <-> entanglement zone changes during the whole circuit
+    - number of abstract VS concrete entanglement site changes (between CZ sites) during the whole circuit
+    - number of abstract VS concrete zone changes (both of the above) during the whole circuit
+
+    (for A, the optimal outcome is for all data points to lie on the angle bisector)
+
+    B) correspondence of zone changes and physical movement operations (atom transports: pick-up, move, drop-off)
+    - number of abstract zone changes (all kinds, incl. readout) during the whole circuit VS number of concrete atom transports
+
+    (for B, the optimal outcome is for all data points to lie on an arbitrary increasing linear function)
+    """
+    # 1) one row per circuit with the summed counts
+    scores = []
+    for rows in circuits:
+        counts = Counter()  # (source, metric) -> summed count
+        wall_clock_s = {}  # source -> run time in seconds
+        for row in rows:
+            if row["count"]:
+                counts[(row["source"], row["metric"])] += float(row["count"])  # move_distance is not an integer
+            elif row["metric"] == "wall_clock_s":
+                wall_clock_s[row["source"]] = float(row["value"])
+        scores.append({
+            "circuit": rows[0]["circuit"],
+            "num_qubits": int(rows[0]["num_qubits"]),
+            "abstract_storage_entanglement": int(counts[("abstract", "storage_entanglement")]),
+            "abstract_inter_entanglement": int(counts[("abstract", "inter_entanglement")]),
+            "abstract_zone_changes": int(sum(counts[("abstract", metric)] for metric in NA_COMPARABLE_ZONE_CHANGES)),
+            "abstract_all_zone_changes": int(sum(counts[("abstract", metric)] for metric in NA_ZONE_CHANGES)),
+            "compiled_storage_entanglement": int(counts[("compiled", "storage_entanglement")]),
+            "compiled_inter_entanglement": int(counts[("compiled", "inter_entanglement")]),
+            "compiled_zone_changes": int(sum(counts[("compiled", metric)] for metric in NA_COMPARABLE_ZONE_CHANGES)),
+            "compiled_atom_moves": int(counts[("compiled", NA_ATOM_MOVES)]),
+            "abstract_wall_clock_s": wall_clock_s["abstract"],
+            "compiled_wall_clock_s": wall_clock_s["compiled"],
+        })
+    scores.sort(key=lambda c: c["num_qubits"])  # larger circuits drawn on top
+    qubits = [c["num_qubits"] for c in scores]
+    mean_compile_s = np.mean([c["compiled_wall_clock_s"] for c in scores])
+    mean_abstract_s = np.mean([c["abstract_wall_clock_s"] for c in scores])
+
+    # 2) the plots: (file name, title, x column, y column, x label, y label, same quantity on both axes)
+    plots = [
+        ("storage_entanglement", "storage ↔ entanglement zone changes", "abstract_storage_entanglement",
+         "compiled_storage_entanglement", "abstract storage ↔ EZ changes", "compiled storage ↔ EZ changes", True),
+        ("inter_entanglement", "entanglement site changes", "abstract_inter_entanglement", "compiled_inter_entanglement",
+         "abstract EZ site changes", "compiled EZ site changes", True),
+        ("zone_changes", "zone changes (storage ↔ EZ + EZ site)", "abstract_zone_changes", "compiled_zone_changes",
+         "abstract zone changes", "compiled zone changes", True),
+        ("zone_changes_vs_atom_moves", "zone changes vs atom moves", "abstract_all_zone_changes", "compiled_atom_moves",
+         "abstract zone changes (incl. readout)", "compiled atom transports", False),
+    ]
+    for name, title, x_key, y_key, x_label, y_label, same_quantity in plots:
+        xs = [c[x_key] for c in scores]
+        ys = [c[y_key] for c in scores]
+        fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # counts: integer ticks only
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+
+        # axis ranges, and the y = x line if both axes show the same quantity
+        x_end = max([*xs, 1]) * 1.08
+        y_end = max([*ys, 1]) * 1.08
+        if same_quantity:
+            x_end = y_end = max(x_end, y_end)
+            ax.plot([0, x_end], [0, x_end], color=REFERENCE, linewidth=3, zorder=2, label="exact match")
+        ax.set_xlim(0, x_end)
+        ax.set_ylim(0, y_end)
+
+        # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²)
+        subtitle = f"number of circuits = {len(xs)}"
+        if len(set(xs)) >= 2 and len(set(ys)) >= 2:
+            slope, intercept, slope_low, slope_high = theilslopes(ys, xs)
+            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, linewidth=2, zorder=2,
+                    label=f"robust fit (Theil-Sen), slope 95% CI {slope_low:.2f}–{slope_high:.2f}")
+            slope, intercept = np.polyfit(xs, ys, 1)
+            r_squared = np.corrcoef(xs, ys)[0, 1] ** 2
+            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, linewidth=1.2,
+                    linestyle="--", zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
+            if len(xs) >= 3:
+                subtitle += f"   Pearson r = {pearsonr(xs, ys).statistic:.2f}"
+                subtitle += f"   Spearman ρ = {spearmanr(xs, ys).statistic:.2f}"
+
+        # the circuits, colored by qubit number
+        points = ax.scatter(xs, ys, s=56, c=qubits, cmap=QUBIT_CMAP, vmin=QUBIT_MIN, vmax=QUBIT_MAX,
+                            edgecolors=SURFACE, linewidths=1.5, zorder=3)
+        colorbar = fig.colorbar(points, ax=ax, ticks=range(QUBIT_MIN, QUBIT_MAX + 1, 4), fraction=0.05, pad=0.03)
+        colorbar.set_label("qubits in circuit", color=TEXT_SECONDARY, fontsize=10)
+        colorbar.outline.set_visible(False)
+        colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
+
+        style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label,
+              notes=(f"avg. run time: compilation {mean_compile_s:.3g} s vs abstract execution {mean_abstract_s:.3g} s",))
+        fig.savefig(f"{file_prefix}__{name}.png", dpi=DPI, facecolor=SURFACE)
+        plt.close(fig)
+
+    # 3) table of the plotted numbers
+    with open(f"{file_prefix}__aggregated.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(scores[0]))
+        writer.writeheader()
+        writer.writerows(sorted(scores, key=lambda c: c["circuit"]))
+
+
+def visualize_na_distribution(config: str, circuits: list[list[dict]], file_prefix: str) -> None:
+    """Location-based metrics, i.e. where in the circuit hardware events happen.
+
+    Four figures per hardware configuration:
+
+    A) estimation of zone changes (only the kinds the compiler has: storage <-> entanglement zone, between CZ sites)
+    - location agreement:  F1 score between the abstract model vs the compilation having a zone change in a given slot,
+                           exactly and with a tolerance of a certain number of anchors of the same qubit
+                           (the optimal outcome is for all data points to lie on 1)
+    - timing shift: per qubit and kind, the abstract and compiled zone changes are paired, each paired event gives
+                    [shift = abstract anchor - compiled anchor] (< 0: event too early, > 0: event too late);
+                    unpaired events are "missing" (too few abstract events) or "extra" (too many abstract events)
+                    (the optimal outcome is for all data be concentrated on 0)
+
+    B) correspondence of zone changes (all kinds, incl. readout) and physical movement operations (atom transports)
+    - event timing: per qubit, [shift = average anchor of its abstract zone changes - average anchor of its compiled
+                    atom transports], i.e. abstract events inserted earlier or later than concrete events
+                    (the optimal outcome is for all data points to lie on 0)
+    - event amount: per qubit, its share (number of events of qubit / number of events in general) of its
+                    abstract zone changes vs its atom transports over the whole circuit
+                    (the optimal outcome is for all data points to lie on the angle bisector)
+
+    """
+    # 1) one score row per circuit, plus the per-event / per-qubit values pooled over all circuits
+    scores = []
+    shifts, missing, extra = [], 0, 0  # paired zone change shifts, unpaired zone changes
+    qubit_shifts_per_circuit = []  # per circuit: the event timing shift of each qubit
+    qubit_shares = []  # per qubit: (share of the circuit's atom transports, share of the circuit's abstract zone changes)
+    nan = float("nan")
+    for rows in circuits:
+        num_qubits = int(rows[0]["num_qubits"])
+
+        # per slot: abstract / compiled (comparable) zone changes, all abstract zone changes and compiled atom transports;
+        # per qubit: number of anchors
+        zone_changes: dict[str, Counter[tuple[int, int]]] = {"abstract": Counter(), "compiled": Counter()}
+        all_zone_changes: Counter[tuple[int, int]] = Counter()  # abstract, incl. readout
+        events: defaultdict[tuple[str, str, int], list[int]] = defaultdict(list)  # (source, kind, qubit) -> anchors
+        moves: Counter[tuple[int, int]] = Counter()
+        anchors = [0] * num_qubits
+        for row in rows:
+            if row["source"] == "circuit" and row["metric"] == "anchors":
+                anchors[int(row["qubit"])] = int(row["value"])
+            elif row["count"]:
+                slot = (int(row["qubit"]), int(row["anchor"]))
+                if row["metric"] in NA_COMPARABLE_ZONE_CHANGES:
+                    zone_changes[row["source"]][slot] += int(row["count"])
+                    events[(row["source"], row["metric"], slot[0])].append(slot[1])
+                if row["source"] == "abstract" and row["metric"] in NA_ZONE_CHANGES:
+                    all_zone_changes[slot] += int(row["count"])
+                elif row["source"] == "compiled" and row["metric"] == NA_ATOM_MOVES:
+                    moves[slot] += int(row["count"])
+        if not any(anchors):
+            print(f"Skipped {config} / {rows[0]['circuit']}: no anchor rows in the raw file (re-run the runner)")
+            continue
+
+        # timing shift: pair each qubit's abstract and compiled zone changes of the same kind
+        circuit_shifts, circuit_missing, circuit_extra = [], 0, 0
+        for kind in NA_COMPARABLE_ZONE_CHANGES:
+            for qubit in range(num_qubits):
+                paired, unpaired_abstract, unpaired_compiled = align(sorted(events[("abstract", kind, qubit)]),
+                                                                     sorted(events[("compiled", kind, qubit)]))
+                circuit_shifts += paired
+                circuit_extra += unpaired_abstract
+                circuit_missing += unpaired_compiled
+        shifts += circuit_shifts
+        missing += circuit_missing
+        extra += circuit_extra
+
+        # event timing and amount per qubit (slots before its last anchor: (qubit, k) for k < its number of anchors)
+        abstract_per_qubit = [[all_zone_changes[(q, k)] for k in range(anchors[q])] for q in range(num_qubits)]
+        moves_per_qubit = [[moves[(q, k)] for k in range(anchors[q])] for q in range(num_qubits)]
+        qubit_shifts = [float(np.average(range(len(a)), weights=a) - np.average(range(len(m)), weights=m))
+                        for a, m in zip(abstract_per_qubit, moves_per_qubit) if sum(a) and sum(m)]
+        if qubit_shifts:
+            qubit_shifts_per_circuit.append(qubit_shifts)
+        abstract_total, moves_total = sum(map(sum, abstract_per_qubit)), sum(map(sum, moves_per_qubit))
+        if abstract_total and moves_total:
+            qubit_shares += [(sum(m) / moves_total, sum(a) / abstract_total)
+                             for a, m in zip(abstract_per_qubit, moves_per_qubit) if len(a)]
+
+        abstract_slots, compiled_slots = set(zone_changes["abstract"]), set(zone_changes["compiled"])
+        scores.append({
+            "circuit": rows[0]["circuit"],
+            "num_qubits": num_qubits,
+            **{f"f1_{'exact' if t == 0 else f'pm{t}'}": f1(abstract_slots, compiled_slots, t) for t in F1_TOLERANCES},
+            "paired_zone_changes": len(circuit_shifts),
+            "share_on_time": circuit_shifts.count(0) / len(circuit_shifts) if circuit_shifts else nan,
+            "mean_shift": float(np.mean(circuit_shifts)) if circuit_shifts else nan,
+            "missing_zone_changes": circuit_missing,
+            "extra_zone_changes": circuit_extra,
+            "qubits_early": float(np.mean(np.array(qubit_shifts) < -ON_TIME)) if qubit_shifts else nan,
+            "qubits_on_time": float(np.mean(np.abs(qubit_shifts) <= ON_TIME)) if qubit_shifts else nan,
+            "qubits_late": float(np.mean(np.array(qubit_shifts) > ON_TIME)) if qubit_shifts else nan,
+            "event_shift_median": float(np.median(qubit_shifts)) if qubit_shifts else nan,
+            "noise_shift_q25": float(np.percentile(qubit_shifts, 25)) if qubit_shifts else nan,
+            "noise_shift_q75": float(np.percentile(qubit_shifts, 75)) if qubit_shifts else nan,
+        })
+    if not scores:
+        return
+    scores.sort(key=lambda c: (c["num_qubits"], c["circuit"]))
+
+    # A) location agreement: F1 over the allowed anchor offset, one thin line per circuit, median bold (with its
+    # values) and the middle 50% of circuits as a band
+    keys = [key for key in scores[0] if key.startswith("f1_")]
+    scored = [c for c in scores if not np.isnan(c["f1_exact"])]
+    f1s = np.array([[c[k] for k in keys] for c in scored]).reshape(-1, len(keys))
+    fig, ax = plt.subplots(figsize=(6, 7), facecolor=SURFACE)  # taller: room for the explanatory legend
+    ax.axhline(1, color=REFERENCE, linewidth=4, zorder=1.6, label="abstract and concrete zone changes in the same slots")  # above the grid
+    for row in f1s:
+        ax.plot(F1_TOLERANCES, row, color=SERIES, alpha=0.18, linewidth=1, zorder=2)
+    ax.plot([], [], color=SERIES, alpha=0.4, linewidth=1, label="one circuit")
+    if len(f1s):
+        ax.fill_between(F1_TOLERANCES, np.percentile(f1s, 25, axis=0), np.percentile(f1s, 75, axis=0), color=SERIES,
+                        alpha=0.15, linewidth=0, zorder=2, label="middle 50% of circuits")
+        medians = np.median(f1s, axis=0)
+        ax.plot(F1_TOLERANCES, medians, color=SERIES, linewidth=2.5, marker="o", zorder=3, label="median circuit")
+        for t, m in zip(F1_TOLERANCES, medians):
+            ax.annotate(f"{m:.2f}", (t, m), textcoords="offset points", xytext=(0, -16), ha="center",
+                        color=TEXT_SECONDARY, fontsize=9)
+    ax.set_xticks(F1_TOLERANCES, [f"±{t}" if t else "exact" for t in F1_TOLERANCES])
+    ax.set_ylim(0, 1.04)
+    style(fig, ax, f"{config}: zone change location agreement", f"number of circuits = {len(scored)}",
+          "allowed anchor offset", "F1 score of zone change slots",
+          notes=("slot = one qubit's interval between two consecutive anchors",
+                 "A / C = slots with ≥ 1 abstract / compiled zone change (storage ↔ EZ, EZ site)",
+                 "precision (how many of the abstract events are real) ",
+                 "     = share of A with a C slot within ±offset",
+                 "recall (how many real places the model finds) ",
+                 "     = share of C with an A slot within ±offset",
+                 "F1 = 2 · precision · recall / (precision + recall)"))
+    fig.savefig(f"{file_prefix}__location_agreement.png", dpi=DPI, facecolor=SURFACE)
+    plt.close(fig)
+
+    # A) timing shift: histogram of the shifts of all paired zone changes, plus the unpaired ones
+    by_shift = Counter(shifts)
+    span = max([1, *(abs(s) for s in shifts)])
+    values = list(range(-span, span + 1))
+    fig, ax = plt.subplots(figsize=(6.5, 5.5), facecolor=SURFACE)
+    ax.bar(values, [by_shift[v] for v in values], width=0.8, color=SERIES, zorder=3, label="paired zone changes")
+    ax.bar([-span - 2, span + 2], [missing, extra], width=0.8, color=MUTED, zorder=3,
+           label=f"unpaired zone changes: {missing} missing, {extra} extra")
+    ax.axvline(0, color=REFERENCE, linewidth=3, zorder=4)
+    ax.set_xticks([-span - 2, *values, span + 2], ["missing", *(f"{v:+d}" if v else "0" for v in values), "extra"])
+    subtitle = "no paired zone changes"
+    if shifts:
+        subtitle = (f"{len(shifts)} paired: {shifts.count(0) / len(shifts):.0%} on time,"
+                    f" {sum(s < 0 for s in shifts) / len(shifts):.0%} early, {sum(s > 0 for s in shifts) / len(shifts):.0%} late,"
+                    f" mean shift {np.mean(shifts):+.2f} anchors")
+    style(fig, ax, f"{config}: zone change timing (abstract vs compiled)", subtitle,
+          "timing shift in anchors", "zone changes (all circuits)",
+          notes=("shift = abstract - compiled anchor of a paired zone change (of the same kind)",
+                 "< 0: events too early, > 0: too late",
+                 "missing: compiled zone change without abstract one (too few events)",
+                 "extra: abstract zone change without compiled one (too many events)"))
+    fig.savefig(f"{file_prefix}__timing_shift.png", dpi=DPI, facecolor=SURFACE)
+    plt.close(fig)
+
+    # B) event timing: per qubit, where the weight of its abstract zone changes lies relative to the weight center of its
+    # real (compiled) atom transports; per shift bin the share of a circuit's qubits (dots) and of the average circuit (bar)
+    edges = [-np.inf, -2, -1, -0.5, -ON_TIME, ON_TIME, 0.5, 1, 2, np.inf]
+    bin_labels = ["< -2", "-2…-1", "-1…-½", "−½…−¼", "±¼", "¼…½", "½…1", "1…2", "> 2"]
+    center = bin_labels.index("±¼")
+    per_circuit = [np.histogram(s, edges)[0] / len(s) for s in qubit_shifts_per_circuit]
+    positions = np.arange(len(bin_labels))
+    jitter = np.random.default_rng(0)  # fixed, so the plot is the same on every run
+    fig, ax = plt.subplots(figsize=(7, 5.5), facecolor=SURFACE)
+    ax.axvline(center, color=REFERENCE, linewidth=4, zorder=1.6,  # above the grid
+               label="weight center of the qubit's real atom transports")
+    if per_circuit:
+        ax.bar(positions, np.mean(per_circuit, axis=0), width=0.7, color=SERIES, alpha=0.25, zorder=2,
+               label="average circuit")
+        for shares in per_circuit:
+            drawn = shares > 0  # circuits without qubits in a bin are left out, so the tails stay readable
+            ax.scatter(positions[drawn] + jitter.uniform(-0.22, 0.22, drawn.sum()), shares[drawn], s=18,
+                       color=SERIES, alpha=0.8, edgecolors=SURFACE, linewidths=0.6, zorder=3)
+    ax.scatter([], [], s=18, color=SERIES, label="circuit")
+    ax.set_xticks(positions, bin_labels)
+    ax.yaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
+    ax.set_ylim(0, 1.04)
+    scored = [c for c in scores if not np.isnan(c["qubits_on_time"])]
+    style(fig, ax, f"{config}: event timing, abstract vs compiled", f"number of circuits = {len(scored)}",
+          "anchor distance between the abstract event weight compared to the concrete event weight",
+          "share of the circuit's qubits",
+          notes=("per-qubit comparison of weight center (avg. anchor) of its compiled atom transports",
+                 "and the weight center of its abstract zone changes (incl. readout)",
+                 "< 0: abstract events too early on a qubit, > 0: too late"))
+    fig.savefig(f"{file_prefix}__event_timing.png", dpi=DPI, facecolor=SURFACE)
+    plt.close(fig)
+
+    # B) event amount: per qubit its share of the circuit's abstract zone changes vs of its atom transports
+    fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
+    end = max([0.1, *(max(m, a) for m, a in qubit_shares)]) * 1.08
+    ax.plot([0, end], [0, end], color=REFERENCE, linewidth=3, zorder=2, label="exact match")
+    ax.scatter([m for m, _ in qubit_shares], [a for _, a in qubit_shares], s=40, color=SERIES, alpha=0.75,
+               edgecolors=SURFACE, linewidths=1, zorder=3)
+    ax.set_xlim(0, end)
+    ax.set_ylim(0, end)
+    subtitle = f"number of qubits = {len(qubit_shares)}"
+    if qubit_shares:
+        subtitle += (f"   > 1.5× its movement share: {sum(a > 1.5 * m for m, a in qubit_shares) / len(qubit_shares):.0%},"
+                     f" < 1/1.5×: {sum(1.5 * a < m for m, a in qubit_shares) / len(qubit_shares):.0%}")
+    style(fig, ax, f"{config}: event amount vs atom moves", subtitle,
+          "qubit's share of the circuit's compiled atom transports", "qubit's share of the abstract zone changes",
+          notes=("above: more abstract events than its movement share, below: less",
+                 "one data point = one qubit, shares within its circuit"))
+    fig.savefig(f"{file_prefix}__event_amount.png", dpi=DPI, facecolor=SURFACE)
+    plt.close(fig)
+
+    # table of the per-circuit scores (empty = undefined, e.g. no zone change slot in the circuit)
     with open(f"{file_prefix}__distribution.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(scores[0]))
         writer.writeheader()

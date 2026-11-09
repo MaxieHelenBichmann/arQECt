@@ -1,5 +1,6 @@
 """Constructs specific hardware."""
 
+import json
 import math
 from collections import Counter
 
@@ -42,9 +43,43 @@ def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsM
     abstract_model = TrappedIonsModel(interaction_zone_capacity=capacity, nr_interaction_sites=nr_zones)
     return abstract_model, concrete_hardware
 
-def prepare_na_hardware(parameters: dict) -> tuple[NeutralAtomsModel, ZonedNeutralAtomArchitecture]:
-    abstract_model = NeutralAtomsModel(entanglement_zone_capacity=parameters["entanglement_zone_capacity"], readout_zone_capacity=parameters["readout_zone_capacity"])
-    return abstract_model, None
+def prepare_na_hardware(parameters: dict, num_qubits: int) -> tuple[NeutralAtomsModel, ZonedNeutralAtomArchitecture]:
+    """Construct a zoned neutral atom architecture as the abstract model and the concrete MQT QMAP (zoned) hardware.
+
+    parameters: `entanglement_zone_size` fixed n x m grid
+    
+    """
+    ez_rows, ez_cols = parameters["entanglement_zone_size"]
+    nr_ezs = parameters.get("nr_entanglement_zones", 1)
+    if nr_ezs not in (1, 2):
+        raise ValueError(f"Unsupported number of entanglement zones {nr_ezs} (1, 2).")
+    storage_cols = max(4 * ez_cols, math.ceil(math.sqrt(2 * num_qubits)))
+    storage_rows, storage_cols = parameters.get("storage_zone_size", (math.ceil(2 * num_qubits / storage_cols), storage_cols))
+
+    # layout (y grows downwards, all coordinates positive): [EZ 1]  [storage]  [EZ 0] (compiler does not support readout zones)
+    margin, gap = 4, 20
+    ez_height = 10 * (ez_rows - 1)
+    storage_y = margin + (ez_height + gap if nr_ezs == 2 else 0)
+    ez_ys = [storage_y + 3 * (storage_rows - 1) + gap, margin][:nr_ezs]
+    spec = {
+        "name": "zoned",
+        "operation_duration": {"rydberg_gate": 0.36, "single_qubit_gate": 52, "atom_transfer": 15},  # us
+        "operation_fidelity": {"rydberg_gate": 0.995, "single_qubit_gate": 0.9997, "atom_transfer": 0.999},
+        "qubit_spec": {"T": 1.5e6},
+        "storage_zones": [{"zone_id": 0, "offset": [margin, storage_y], "dimension": [3 * storage_cols, 3 * storage_rows],
+                           "slms": [{"id": 0, "site_separation": [3, 3], "r": storage_rows, "c": storage_cols, "location": [margin, storage_y]}]}],
+        "entanglement_zones": [{"zone_id": z, "offset": [margin, y], "dimension": [12 * ez_cols, ez_height + 10],
+                                "slms": [{"id": 2 * z + 1, "site_separation": [12, 10], "r": ez_rows, "c": ez_cols, "location": [margin, y]},
+                                         {"id": 2 * z + 2, "site_separation": [12, 10], "r": ez_rows, "c": ez_cols, "location": [margin + 2, y]}]}
+                               for z, y in enumerate(ez_ys)],
+        "aods": [{"id": 0, "site_separation": 2, "r": parameters.get("aod_size", (100, 100))[0], "c": parameters.get("aod_size", (100, 100))[1]}],
+        "rydberg_range": [[[margin - 2, y - 2], [margin + 12 * ez_cols, y + ez_height + 2]] for y in ez_ys],
+    }
+    concrete_hardware = ZonedNeutralAtomArchitecture.from_json_string(json.dumps(spec))
+
+    readout_rows, readout_cols = parameters["readout_zone_size"]
+    abstract_model = NeutralAtomsModel(entanglement_zone_capacity=nr_ezs * ez_rows * ez_cols, readout_zone_capacity=readout_rows * readout_cols)
+    return abstract_model, concrete_hardware
 
 
 

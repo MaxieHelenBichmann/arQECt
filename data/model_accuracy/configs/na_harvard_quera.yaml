@@ -1,0 +1,7 @@
+platform: NA
+name: "Harvard QuEra"
+architecture:
+  nr_entanglement_zones: 1
+  entanglement_zone_size: [7, 20]
+  readout_zone_size: [5, 20]
+  storage_zone_size: [20, 100]
