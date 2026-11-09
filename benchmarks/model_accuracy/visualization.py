@@ -120,6 +120,56 @@ def style(fig, ax, title: str, subtitle: str, x_label: str, y_label: str, notes:
     fig.tight_layout()
 
 
+def plot_event_amount(qubit_shares: list[tuple[float, float, int]], title: str, x_label: str, y_label: str,
+                      above_note: str, file: str) -> None:
+    """Per qubit its share of the circuit's compiled events (x) vs of the abstract events (y), colored by the qubit
+    number of its circuit. Shares are ~1/n, so both axes are logarithmic: the diagonal stays the exact match and a
+    factor between the shares becomes a fixed distance from it. Zero shares get their own strip at the axis start."""
+    shares = np.array([(m, a) for m, a, _ in qubit_shares]).reshape(-1, 2)
+    qubits = np.array([n for _, _, n in qubit_shares])
+    nonzero = shares[shares > 0]
+    lo = nonzero.min() / 1.3 if nonzero.size else 0.01  # lower end of the log part
+    has_zeros = bool((shares == 0).any())
+    zero_at, end = lo / 2.2, 1.3  # zero strip, below a break at lo / 1.4
+    start = lo / 3.2 if has_zeros else lo
+    rng = np.random.default_rng(0)
+    plotted = np.where(shares > 0, shares, zero_at * rng.uniform(0.85, 1.18, shares.shape))  # jitter the zero pile
+
+    fig, ax = plt.subplots(figsize=(6.6, 6), facecolor=SURFACE)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    diagonal = np.array([zero_at if has_zeros else lo, end])  # through the zero strip's (0, 0) as well
+    ax.fill_between(diagonal, diagonal / 1.5, diagonal * 1.5, color=REFERENCE, alpha=0.12, linewidth=0, zorder=1,
+                    label="within 1.5× of its compiled share")
+    ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
+    for edge in (ax.axhline, ax.axvline) if has_zeros else ():  # break between the zero strip and the log axis
+        edge(lo / 1.4, color=BASELINE, linewidth=1, linestyle=(0, (4, 3)), zorder=1.5)
+
+    order = np.argsort(-qubits)  # smaller circuits (larger shares, fewer points) drawn on top
+    points = ax.scatter(plotted[order, 0], plotted[order, 1], s=26, c=qubits[order], cmap=QUBIT_CMAP,
+                        vmin=QUBIT_MIN, vmax=QUBIT_MAX, alpha=0.8, edgecolors=SURFACE, linewidths=0.6, zorder=3)
+    colorbar = fig.colorbar(points, ax=ax, ticks=range(QUBIT_MIN, QUBIT_MAX + 1, 4), fraction=0.05, pad=0.03)
+    colorbar.set_label("qubits in circuit", color=TEXT_SECONDARY, fontsize=10)
+    colorbar.outline.set_visible(False)
+    colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
+
+    ticks = [t for t in (0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1) if t >= lo]
+    for set_lim, set_ticks in ((ax.set_xlim, ax.set_xticks), (ax.set_ylim, ax.set_yticks)):
+        set_lim(start, end)
+        set_ticks([zero_at, *ticks] if has_zeros else ticks, [*(["0"] if has_zeros else []), *(f"{t:g}" for t in ticks)])
+    ax.minorticks_off()
+
+    subtitle = f"number of qubits = {len(shares)}"
+    if len(shares):
+        m, a = shares[:, 0], shares[:, 1]
+        subtitle += (f"   > 1.5× its compiled share: {np.mean(a > 1.5 * m):.0%}, < 1/1.5×: {np.mean(1.5 * a < m):.0%}"
+                     f"   zero share: {np.mean((m == 0) | (a == 0)):.0%}")
+    style(fig, ax, title, subtitle, x_label, y_label,
+          notes=(above_note, "one data point = one qubit, shares within its circuit (log scale)"))
+    fig.savefig(file, dpi=DPI, facecolor=SURFACE)
+    plt.close(fig)
+
+
 def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix: str) -> None:
     """Scatter aggregated abstract vs compiled metrics.
 
@@ -332,7 +382,7 @@ def visualize_ti_distribution(config: str, circuits: list[list[dict]], file_pref
             qubit_shifts_per_circuit.append(qubit_shifts)
         abstract_total, moves_total = sum(map(sum, abstract_per_qubit)), sum(map(sum, moves_per_qubit))
         if abstract_total and moves_total:
-            qubit_shares += [(sum(m) / moves_total, sum(a) / abstract_total)
+            qubit_shares += [(sum(m) / moves_total, sum(a) / abstract_total, num_qubits)
                              for a, m in zip(abstract_per_qubit, moves_per_qubit) if len(a)]
 
         abstract_slots, compiled_slots = set(iz_changes["abstract"]), set(iz_changes["compiled"])
@@ -445,23 +495,9 @@ def visualize_ti_distribution(config: str, circuits: list[list[dict]], file_pref
     plt.close(fig)
 
     # B) event amount: per qubit its share of the circuit's abstract IZ changes vs of its ion moves
-    fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
-    end = max([0.1, *(max(m, a) for m, a in qubit_shares)]) * 1.08
-    ax.plot([0, end], [0, end], color=REFERENCE, linewidth=3, zorder=2, label="exact match")
-    ax.scatter([m for m, _ in qubit_shares], [a for _, a in qubit_shares], s=40, color=SERIES, alpha=0.75,
-               edgecolors=SURFACE, linewidths=1, zorder=3)
-    ax.set_xlim(0, end)
-    ax.set_ylim(0, end)
-    subtitle = f"number of qubits = {len(qubit_shares)}"
-    if qubit_shares:
-        subtitle += (f"   > 1.5× its movement share: {sum(a > 1.5 * m for m, a in qubit_shares) / len(qubit_shares):.0%},"
-                     f" < 1/1.5×: {sum(1.5 * a < m for m, a in qubit_shares) / len(qubit_shares):.0%}")
-    style(fig, ax, f"{config}: event amount vs ion moves", subtitle,
-          "qubit's share of the circuit's compiled ion moves", "qubit's share of the abstract IZ changes",
-          notes=("above: more abstract events than its movement share, below: less",
-                 "one data point = one qubit, shares within its circuit"))
-    fig.savefig(f"{file_prefix}__event_amount.png", dpi=DPI, facecolor=SURFACE)
-    plt.close(fig)
+    plot_event_amount(qubit_shares, f"{config}: event amount vs ion moves",
+                      "qubit's share of the circuit's compiled ion moves", "qubit's share of the abstract IZ changes",
+                      "above: more abstract events than its movement share, below: less", f"{file_prefix}__event_amount.png")
 
     # table of the per-circuit scores (empty = undefined, e.g. no IZ change slot in the circuit)
     with open(f"{file_prefix}__distribution.csv", "w", newline="") as f:
@@ -660,7 +696,7 @@ def visualize_na_distribution(config: str, circuits: list[list[dict]], file_pref
             qubit_shifts_per_circuit.append(qubit_shifts)
         abstract_total, moves_total = sum(map(sum, abstract_per_qubit)), sum(map(sum, moves_per_qubit))
         if abstract_total and moves_total:
-            qubit_shares += [(sum(m) / moves_total, sum(a) / abstract_total)
+            qubit_shares += [(sum(m) / moves_total, sum(a) / abstract_total, num_qubits)
                              for a, m in zip(abstract_per_qubit, moves_per_qubit) if len(a)]
 
         abstract_slots, compiled_slots = set(zone_changes["abstract"]), set(zone_changes["compiled"])
@@ -773,23 +809,9 @@ def visualize_na_distribution(config: str, circuits: list[list[dict]], file_pref
     plt.close(fig)
 
     # B) event amount: per qubit its share of the circuit's abstract zone changes vs of its atom transports
-    fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
-    end = max([0.1, *(max(m, a) for m, a in qubit_shares)]) * 1.08
-    ax.plot([0, end], [0, end], color=REFERENCE, linewidth=3, zorder=2, label="exact match")
-    ax.scatter([m for m, _ in qubit_shares], [a for _, a in qubit_shares], s=40, color=SERIES, alpha=0.75,
-               edgecolors=SURFACE, linewidths=1, zorder=3)
-    ax.set_xlim(0, end)
-    ax.set_ylim(0, end)
-    subtitle = f"number of qubits = {len(qubit_shares)}"
-    if qubit_shares:
-        subtitle += (f"   > 1.5× its movement share: {sum(a > 1.5 * m for m, a in qubit_shares) / len(qubit_shares):.0%},"
-                     f" < 1/1.5×: {sum(1.5 * a < m for m, a in qubit_shares) / len(qubit_shares):.0%}")
-    style(fig, ax, f"{config}: event amount vs atom moves", subtitle,
-          "qubit's share of the circuit's compiled atom transports", "qubit's share of the abstract zone changes",
-          notes=("above: more abstract events than its movement share, below: less",
-                 "one data point = one qubit, shares within its circuit"))
-    fig.savefig(f"{file_prefix}__event_amount.png", dpi=DPI, facecolor=SURFACE)
-    plt.close(fig)
+    plot_event_amount(qubit_shares, f"{config}: event amount vs atom moves",
+                      "qubit's share of the circuit's compiled atom transports", "qubit's share of the abstract zone changes",
+                      "above: more abstract events than its movement share, below: less", f"{file_prefix}__event_amount.png")
 
     # table of the per-circuit scores (empty = undefined, e.g. no zone change slot in the circuit)
     with open(f"{file_prefix}__distribution.csv", "w", newline="") as f:
@@ -940,7 +962,7 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
             qubit_shifts_per_circuit.append(qubit_shifts)
         abstract_total, moves_total = sum(map(sum, abstract_per_qubit)), sum(map(sum, moves_per_qubit))
         if abstract_total and moves_total:
-            qubit_shares += [(sum(m) / moves_total, sum(a) / abstract_total)
+            qubit_shares += [(sum(m) / moves_total, sum(a) / abstract_total, num_qubits)
                              for a, m in zip(abstract_per_qubit, moves_per_qubit) if len(a)]
 
         scores.append({
@@ -992,23 +1014,9 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
     plt.close(fig)
 
     # event amount: per qubit its share of the circuit's abstract swaps vs of its compiled swaps
-    fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
-    end = max([0.1, *(max(m, a) for m, a in qubit_shares)]) * 1.08
-    ax.plot([0, end], [0, end], color=REFERENCE, linewidth=3, zorder=2, label="exact match")
-    ax.scatter([m for m, _ in qubit_shares], [a for _, a in qubit_shares], s=40, color=SERIES, alpha=0.75,
-               edgecolors=SURFACE, linewidths=1, zorder=3)
-    ax.set_xlim(0, end)
-    ax.set_ylim(0, end)
-    subtitle = f"number of qubits = {len(qubit_shares)}"
-    if qubit_shares:
-        subtitle += (f"   > 1.5× its compiled share: {sum(a > 1.5 * m for m, a in qubit_shares) / len(qubit_shares):.0%},"
-                     f" < 1/1.5×: {sum(1.5 * a < m for m, a in qubit_shares) / len(qubit_shares):.0%}")
-    style(fig, ax, f"{config}: event amount vs compiled swaps", subtitle,
-          "qubit's share of the circuit's compiled swaps", "qubit's share of the abstract swaps",
-          notes=("above: more abstract events than its compiled share, below: less",
-                 "one data point = one qubit, shares within its circuit"))
-    fig.savefig(f"{file_prefix}__event_amount.png", dpi=DPI, facecolor=SURFACE)
-    plt.close(fig)
+    plot_event_amount(qubit_shares, f"{config}: event amount vs compiled swaps",
+                      "qubit's share of the circuit's compiled swaps", "qubit's share of the abstract swaps",
+                      "above: more abstract events than its compiled share, below: less", f"{file_prefix}__event_amount.png")
 
     # table of the per-circuit scores (empty = undefined, e.g. no swap slot in the circuit)
     with open(f"{file_prefix}__distribution.csv", "w", newline="") as f:
