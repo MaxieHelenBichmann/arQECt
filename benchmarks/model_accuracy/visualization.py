@@ -547,18 +547,10 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
 def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_prefix: str) -> None:
     """Location-based metrics, i.e. where in the circuit hardware events happen.
 
-    Four figures per hardware configuration, the same as for TI; a swap counts for both of its qubits:
+    Two figures per hardware configuration, the same as part B for TI (the IZ change vs ion move perspective): the compiled
+    swaps are far more than the abstract ones, so they are not matched 1 to 1, only their per-qubit distribution is compared;
+    a swap counts for both of its qubits.
 
-    A) estimation of swaps
-    - location agreement:  F1 score between the abstract model vs the compilation having a swap in a given slot, exactly and
-                           with a tolerance of a certain number of anchors of the same qubit
-                           (the optimal outcome is for all data points to lie on 1)
-    - timing shift: per qubit, the abstract and compiled swaps are paired, each paired event gives
-                    [shift = abstract anchor - compiled anchor] (< 0: event too early, > 0: event too late);
-                    unpaired events are "missing" (too few abstract events) or "extra" (too many abstract events)
-                    (the optimal outcome is for all data be concentrated on 0)
-
-    B) per-qubit distribution of swaps
     - event timing: per qubit, [shift = average anchor of its abstract swaps - average anchor of its compiled swaps],
                     i.e. abstract events inserted earlier or later than concrete events
                     (the optimal outcome is for all data points to lie on 0)
@@ -569,7 +561,6 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
     """
     # 1) one score row per circuit, plus the per-event / per-qubit values pooled over all circuits
     scores = []
-    shifts, missing, extra = [], 0, 0  # paired swap shifts, unpaired swaps
     qubit_shifts_per_circuit = []  # per circuit: the event timing shift of each qubit
     qubit_shares = []  # per qubit: (share of the circuit's compiled swaps, share of the circuit's abstract swaps)
     nan = float("nan")
@@ -578,7 +569,6 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
 
         # per slot: abstract / compiled virtual swaps and compiled swaps; per qubit: number of anchors
         swaps: dict[str, Counter[tuple[int, int]]] = {"abstract": Counter(), "compiled": Counter()}
-        events: defaultdict[tuple[str, int], list[int]] = defaultdict(list)  # (source, qubit) -> anchors
         moves: Counter[tuple[int, int]] = Counter()
         anchors = [0] * num_qubits
         for row in rows:
@@ -588,24 +578,11 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
                 slot = (int(row["qubit"]), int(row["anchor"]))
                 if row["metric"] == SC_SWAPS:
                     swaps[row["source"]][slot] += int(row["count"])
-                    events[(row["source"], slot[0])].append(slot[1])
                 elif row["source"] == "compiled" and row["metric"] == SC_COMPILED_SWAPS:
                     moves[slot] += int(row["count"])
         if not any(anchors):
             print(f"Skipped {config} / {rows[0]['circuit']}: no anchor rows in the raw file (re-run the runner)")
             continue
-
-        # timing shift: pair each qubit's abstract and compiled swaps
-        circuit_shifts, circuit_missing, circuit_extra = [], 0, 0
-        for qubit in range(num_qubits):
-            paired, unpaired_abstract, unpaired_compiled = align(sorted(events[("abstract", qubit)]),
-                                                                 sorted(events[("compiled", qubit)]))
-            circuit_shifts += paired
-            circuit_extra += unpaired_abstract
-            circuit_missing += unpaired_compiled
-        shifts += circuit_shifts
-        missing += circuit_missing
-        extra += circuit_extra
 
         # event timing and amount per qubit (slots before its last anchor: (qubit, k) for k < its number of anchors)
         abstract_per_qubit = [[swaps["abstract"][(q, k)] for k in range(anchors[q])] for q in range(num_qubits)]
@@ -619,16 +596,11 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
             qubit_shares += [(sum(m) / moves_total, sum(a) / abstract_total)
                              for a, m in zip(abstract_per_qubit, moves_per_qubit) if len(a)]
 
-        abstract_slots, compiled_slots = set(swaps["abstract"]), set(swaps["compiled"])
         scores.append({
             "circuit": rows[0]["circuit"],
             "num_qubits": num_qubits,
-            **{f"f1_{'exact' if t == 0 else f'pm{t}'}": f1(abstract_slots, compiled_slots, t) for t in F1_TOLERANCES},
-            "paired_swaps": len(circuit_shifts),
-            "share_on_time": circuit_shifts.count(0) / len(circuit_shifts) if circuit_shifts else nan,
-            "mean_shift": float(np.mean(circuit_shifts)) if circuit_shifts else nan,
-            "missing_swaps": circuit_missing,
-            "extra_swaps": circuit_extra,
+            "abstract_swaps": sum(swaps["abstract"].values()) // 2,
+            "compiled_swaps": sum(swaps["compiled"].values()) // 2,
             "qubits_early": float(np.mean(np.array(qubit_shifts) < -ON_TIME)) if qubit_shifts else nan,
             "qubits_on_time": float(np.mean(np.abs(qubit_shifts) <= ON_TIME)) if qubit_shifts else nan,
             "qubits_late": float(np.mean(np.array(qubit_shifts) > ON_TIME)) if qubit_shifts else nan,
@@ -640,63 +612,7 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
         return
     scores.sort(key=lambda c: (c["num_qubits"], c["circuit"]))
 
-    # A) location agreement: F1 over the allowed anchor offset, one thin line per circuit, median bold (with its
-    # values) and the middle 50% of circuits as a band
-    keys = [key for key in scores[0] if key.startswith("f1_")]
-    scored = [c for c in scores if not np.isnan(c["f1_exact"])]
-    f1s = np.array([[c[k] for k in keys] for c in scored]).reshape(-1, len(keys))
-    fig, ax = plt.subplots(figsize=(6, 7), facecolor=SURFACE)  # taller: room for the explanatory legend
-    ax.axhline(1, color=REFERENCE, linewidth=4, zorder=1.6, label="abstract and compiled swaps in the same slots")  # above the grid
-    for row in f1s:
-        ax.plot(F1_TOLERANCES, row, color=SERIES, alpha=0.18, linewidth=1, zorder=2)
-    ax.plot([], [], color=SERIES, alpha=0.4, linewidth=1, label="one circuit")
-    if len(f1s):
-        ax.fill_between(F1_TOLERANCES, np.percentile(f1s, 25, axis=0), np.percentile(f1s, 75, axis=0), color=SERIES,
-                        alpha=0.15, linewidth=0, zorder=2, label="middle 50% of circuits")
-        medians = np.median(f1s, axis=0)
-        ax.plot(F1_TOLERANCES, medians, color=SERIES, linewidth=2.5, marker="o", zorder=3, label="median circuit")
-        for t, m in zip(F1_TOLERANCES, medians):
-            ax.annotate(f"{m:.2f}", (t, m), textcoords="offset points", xytext=(0, -16), ha="center",
-                        color=TEXT_SECONDARY, fontsize=9)
-    ax.set_xticks(F1_TOLERANCES, [f"±{t}" if t else "exact" for t in F1_TOLERANCES])
-    ax.set_ylim(0, 1.04)
-    style(fig, ax, f"{config}: swap location agreement", f"number of circuits = {len(scored)}",
-          "allowed anchor offset", "F1 score of swap slots",
-          notes=("slot = one qubit's interval between two consecutive anchors",
-                 "A / C = slots with ≥ 1 abstract / compiled swap of that qubit",
-                 "precision (how many of the abstract events are real) ",
-                 "     = share of A with a C slot within ±offset",
-                 "recall (how many real places the model finds) ",
-                 "     = share of C with an A slot within ±offset",
-                 "F1 = 2 · precision · recall / (precision + recall)"))
-    fig.savefig(f"{file_prefix}__location_agreement.png", dpi=DPI, facecolor=SURFACE)
-    plt.close(fig)
-
-    # A) timing shift: histogram of the shifts of all paired swaps, plus the unpaired ones
-    by_shift = Counter(shifts)
-    span = max([1, *(abs(s) for s in shifts)])
-    values = list(range(-span, span + 1))
-    fig, ax = plt.subplots(figsize=(6.5, 5.5), facecolor=SURFACE)
-    ax.bar(values, [by_shift[v] for v in values], width=0.8, color=SERIES, zorder=3, label="paired swaps (per qubit)")
-    ax.bar([-span - 2, span + 2], [missing, extra], width=0.8, color=MUTED, zorder=3,
-           label=f"unpaired swaps (per qubit): {missing} missing, {extra} extra")
-    ax.axvline(0, color=REFERENCE, linewidth=3, zorder=4)
-    ax.set_xticks([-span - 2, *values, span + 2], ["missing", *(f"{v:+d}" if v else "0" for v in values), "extra"])
-    subtitle = "no paired swaps"
-    if shifts:
-        subtitle = (f"{len(shifts)} paired: {shifts.count(0) / len(shifts):.0%} on time,"
-                    f" {sum(s < 0 for s in shifts) / len(shifts):.0%} early, {sum(s > 0 for s in shifts) / len(shifts):.0%} late,"
-                    f" mean shift {np.mean(shifts):+.2f} anchors")
-    style(fig, ax, f"{config}: swap timing (abstract vs compiled)", subtitle,
-          "timing shift in anchors", "swaps per qubit (all circuits)",
-          notes=("shift = abstract - compiled anchor of a paired swap of a qubit",
-                 "< 0: events too early, > 0: too late",
-                 "missing: compiled swap without abstract one (too few events)",
-                 "extra: abstract swap without compiled one (too many events)"))
-    fig.savefig(f"{file_prefix}__timing_shift.png", dpi=DPI, facecolor=SURFACE)
-    plt.close(fig)
-
-    # B) event timing: per qubit, where the weight of its abstract swaps lies relative to the weight center of its
+    # event timing: per qubit, where the weight of its abstract swaps lies relative to the weight center of its
     # compiled swaps; per shift bin the share of a circuit's qubits (dots) and of the average circuit (bar)
     edges = [-np.inf, -2, -1, -0.5, -ON_TIME, ON_TIME, 0.5, 1, 2, np.inf]
     bin_labels = ["< -2", "-2…-1", "-1…-½", "−½…−¼", "±¼", "¼…½", "½…1", "1…2", "> 2"]
@@ -728,7 +644,7 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
     fig.savefig(f"{file_prefix}__event_timing.png", dpi=DPI, facecolor=SURFACE)
     plt.close(fig)
 
-    # B) event amount: per qubit its share of the circuit's abstract swaps vs of its compiled swaps
+    # event amount: per qubit its share of the circuit's abstract swaps vs of its compiled swaps
     fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
     end = max([0.1, *(max(m, a) for m, a in qubit_shares)]) * 1.08
     ax.plot([0, end], [0, end], color=REFERENCE, linewidth=3, zorder=2, label="exact match")
