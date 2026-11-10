@@ -29,7 +29,7 @@ import numpy as np
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.ticker import MaxNLocator
-from scipy.stats import pearsonr, spearmanr, theilslopes
+from scipy.stats import kendalltau, spearmanr, theilslopes
 
 # colors: surface, text, grid / axes, data series, fit line, reference (optimal outcome) line
 SURFACE, TEXT, TEXT_SECONDARY, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#898781"
@@ -131,10 +131,11 @@ def style(fig, ax, title: str, subtitle: str, x_label: str, y_label: str, notes:
 
 
 def plot_event_amount(qubit_shares: list[tuple[float, float, int]], title: str, x_label: str, y_label: str,
-                      above_note: str, file: str) -> None:
+                      above_note: str, file: str, zero_events: str | None = None) -> None:
     """Per qubit its share of the circuit's compiled events (x) vs of the abstract events (y), colored by the qubit
     number of its circuit. Shares are ~1/n, so both axes are logarithmic: the diagonal stays the exact match and a
-    factor between the shares becomes a fixed distance from it. Zero shares get their own strip at the axis start."""
+    factor between the shares becomes a fixed distance from it. Zero shares get their own strip at the axis start; with
+    `zero_events` (the name of the events, e.g. "swaps") the legend explains the zero strip and the share of each part."""
     shares = np.array([(m, a) for m, a, _ in qubit_shares]).reshape(-1, 2)
     qubits = np.array([n for _, _, n in qubit_shares])
     nonzero = shares[shares > 0]
@@ -145,7 +146,7 @@ def plot_event_amount(qubit_shares: list[tuple[float, float, int]], title: str, 
     rng = np.random.default_rng(0)
     plotted = np.where(shares > 0, shares, zero_at * rng.uniform(0.85, 1.18, shares.shape))  # jitter the zero pile
 
-    fig, ax = plt.subplots(figsize=(6.6, 6), facecolor=SURFACE)
+    fig, ax = plt.subplots(figsize=(6.6, 6.9) if zero_events else (6.6, 6), facecolor=SURFACE)  # longer legend
     ax.set_xscale("log")
     ax.set_yscale("log")
     diagonal = np.array([zero_at if has_zeros else lo, end])  # through the zero strip's (0, 0) as well
@@ -170,12 +171,23 @@ def plot_event_amount(qubit_shares: list[tuple[float, float, int]], title: str, 
     ax.minorticks_off()
 
     subtitle = f"number of qubits = {len(shares)}"
+    notes = [above_note, "one data point = one qubit, shares within its circuit (log scale)"]
+    zero_header = f"Zero shares: the qubit has no {zero_events} of that kind in its circuit"
     if len(shares):
         m, a = shares[:, 0], shares[:, 1]
-        subtitle += (f"   > 1.5× its compiled share: {np.mean(a > 1.5 * m):.0%}, < 1/1.5×: {np.mean(1.5 * a < m):.0%}"
-                     f"   zero share: {np.mean((m == 0) | (a == 0)):.0%}")
-    style(fig, ax, title, subtitle, x_label, y_label,
-          notes=(above_note, "one data point = one qubit, shares within its circuit (log scale)"))
+        subtitle += f"   > 1.5× its compiled share: {np.mean(a > 1.5 * m):.0%}, < 1/1.5×: {np.mean(1.5 * a < m):.0%}"
+        if zero_events:  # the zero shares are explained in the legend instead
+            notes += [zero_header,
+                      f"bottom row (missed): compiled {zero_events}, but no abstract ones: {np.mean((m > 0) & (a == 0)):.0%}",
+                      f"left column (invented): abstract {zero_events}, but no compiled ones: {np.mean((m == 0) & (a > 0)):.0%}",
+                      f"corner (correct): neither, the qubit is not involved: {np.mean((m == 0) & (a == 0)):.0%}"]
+        else:
+            subtitle += f"   zero share: {np.mean((m == 0) | (a == 0)):.0%}"
+    style(fig, ax, title, subtitle, x_label, y_label, notes=tuple(notes))
+    for text in ax.get_legend().get_texts():
+        if text.get_text() == zero_header:
+            text.set_fontweight("bold")
+            text.set_color(TEXT)
     fig.savefig(file, dpi=DPI, facecolor=SURFACE)
     plt.close(fig)
 
@@ -225,16 +237,125 @@ def connect_per_gate(fig, ax, xs: list[float], xs_per_gate: list[float], ys: lis
                     solid_capstyle="butt", zorder=circuit_zorder(i) + 1e-5)
 
 
-def agreement(predicted: list[float], actual: list[float], same_quantity: bool) -> str:
-    """Legend text for how well a model's per-circuit counts agree with the compiled ones: Pearson r, Spearman ρ and, if both
-    are the same quantity, the median relative error (|predicted - compiled| / compiled, circuits with no compiled events excluded)."""
-    text = []
-    if len(predicted) >= 3 and len(set(predicted)) >= 2 and len(set(actual)) >= 2:
-        text.append(f"r = {pearsonr(predicted, actual).statistic:.2f}, ρ = {spearmanr(predicted, actual).statistic:.2f}")
-    errors = [abs(p - a) / a for p, a in zip(predicted, actual) if a]
-    if same_quantity and errors:
-        text.append(f"median rel. error {np.median(errors):.0%}")
-    return ", ".join(text) or "no variation"
+EQUIVALENCE_FACTOR = 1.5  # a model's count is "close" to the compiled one if within this factor (band around y = x)
+
+
+def lin_ccc(xs: list[float], ys: list[float]) -> float | None:
+    """Lin's concordance correlation coefficient of the logged values (pairs with a 0 left out), or None if too few: 1 if all
+    lie on y = x; unlike a correlation it also drops for an offset or a slope other than 1, so it measures equivalence.
+    Logged, as the counts span orders of magnitude (otherwise the largest circuits dominate)."""
+    pairs = [(x, y) for x, y in zip(xs, ys) if x > 0 and y > 0]
+    if len(pairs) < 3:
+        return None
+    log_x, log_y = np.log10(pairs).T
+    covariance = np.mean((log_x - log_x.mean()) * (log_y - log_y.mean()))
+    return 2 * covariance / (log_x.var() + log_y.var() + (log_x.mean() - log_y.mean()) ** 2)
+
+
+def equivalence_scores(ax, xs: list[int], xs_per_gate: list[int], ys: list[int], sizes: list[int], x_start: float,
+                       x_end: float) -> list[str]:
+    """For a model count (x) of the same compiled quantity (y): draw the band within EQUIVALENCE_FACTOR around y = x and add
+    the legend section equivalence (how close are the circuits to y = x?): median relative error (|x - y| / y, circuits
+    with y = 0 left out), share within the band (an exact 0 counts as within), median ratio x / y (systematically too
+    many or too few) and Lin's CCC for the counts and per anchor (circuit size removed, as both grow with it).
+    Returns the section header."""
+    band_xs = np.geomspace(x_start, x_end, 2)  # as long as the y = x line
+    ax.fill_between(band_xs, band_xs / EQUIVALENCE_FACTOR, band_xs * EQUIVALENCE_FACTOR, color=REFERENCE, alpha=0.12,
+                    linewidth=0, zorder=1, label=f"within {EQUIVALENCE_FACTOR:g}× of the compiled count")
+    per_anchor = lambda counts: [n / max(size, 1) for n, size in zip(counts, sizes)]
+    header = "Equivalence: how close are the circuits to y = x?"
+    ax.plot([], [], linestyle="none", label=header)
+    for name, model_xs, marker in (("abstract", xs, ABSTRACT_MARKER), ("per-gate", xs_per_gate, PER_GATE_MARKER)):
+        errors = [abs(x - y) / y for x, y in zip(model_xs, ys) if y]
+        within = np.mean([x == y or (x > 0 and y > 0 and max(x / y, y / x) <= EQUIVALENCE_FACTOR) for x, y in zip(model_xs, ys)])
+        ratios = [x / y for x, y in zip(model_xs, ys) if x > 0 and y > 0]
+        text = [f"median rel. error {np.median(errors):.0%}" if errors else "no compiled events",
+                f"{within:.0%} within {EQUIVALENCE_FACTOR:g}×"]
+        if ratios:
+            text.append(f"median ratio to compiled ×{np.median(ratios):.2f}")
+        ax.plot([], [], **marker, label=f"{name} model: {', '.join(text)}")
+        ccc = [lin_ccc(model_xs, ys), lin_ccc(per_anchor(model_xs), per_anchor(ys))]
+        zeros = sum(x == 0 or y == 0 for x, y in zip(model_xs, ys))
+        ax.plot([], [], linestyle="none", label=f"    Lin's CCC (log): raw counts {'–' if ccc[0] is None else f'{ccc[0]:.2f}'},"
+                f"\n        per anchor (bias due to circuit size removed): {'–' if ccc[1] is None else f'{ccc[1]:.2f}'}" + (f", {zeros} with a 0 left out" if zeros else ""))
+    return [header]
+
+
+ABSTRACT_MARKER = dict(marker="o", markersize=7, linestyle="none", color=SERIES)  # legend handles of the two models
+PER_GATE_MARKER = dict(marker="o", markersize=6, linestyle="none", markerfacecolor="none", markeredgecolor=PER_GATE,
+                       markeredgewidth=1.4)
+BAND_SHARE = 0.8  # share of the circuits inside the band around the power-law fit
+BOOTSTRAP_SAMPLES = 500  # resamples of the circuits for the confidence interval of Kendall's τ
+
+
+def correlation(xs: list[float], ys: list[float], rng: np.random.Generator) -> str:
+    """Legend text of the rank correlation (does the order of the circuits agree?): Kendall τ-b with a bootstrap 95% CI
+    (share of circuit pairs in the same order = (1 + τ) / 2) and Spearman ρ."""
+    if len(xs) < 3 or len(set(xs)) < 2 or len(set(ys)) < 2:
+        return "no variation"
+    xs, ys = np.asarray(xs), np.asarray(ys)
+    tau = kendalltau(xs, ys).statistic
+    resamples = (rng.integers(0, len(xs), len(xs)) for _ in range(BOOTSTRAP_SAMPLES))
+    low, high = np.nanpercentile([kendalltau(xs[i], ys[i]).statistic for i in resamples], [2.5, 97.5])
+    return f"Kendall τ = {tau:.2f}, 95% CI [{low:.2f}, {high:.2f}], Spearman ρ = {spearmanr(xs, ys).statistic:.2f}"
+
+
+def power_law_fit(xs: list[float], ys: list[float]) -> tuple[float, float, float, float, float, int] | None:
+    """Robust (Theil-Sen) fit of log y = log c + b · log x, i.e. y = c · x^b, over the circuits with both values > 0:
+    (b, 95% CI low and high of b, c, factor k around the fit with BAND_SHARE of these circuits within ×k, circuits left out
+    for a zero), or None if there are too few. b = 1 means proportional, y = c · x."""
+    pairs = [(x, y) for x, y in zip(xs, ys) if x > 0 and y > 0]
+    if len(pairs) < 3 or len({x for x, _ in pairs}) < 2:
+        return None
+    log_x, log_y = np.log10(pairs).T
+    b, log_c, b_low, b_high = theilslopes(log_y, log_x)
+    k = 10 ** np.quantile(np.abs(log_y - (log_c + b * log_x)), BAND_SHARE)
+    return b, b_low, b_high, 10 ** log_c, k, len(xs) - len(pairs)
+
+
+def proportionality(fit: tuple | None) -> str:
+    """Legend text of a power_law_fit: the exponent b with its CI and the band factor."""
+    if fit is None:
+        return "too few circuits"
+    b, b_low, b_high, _, k, zeros = fit
+    return (f"b = {b:.2f}, 95% CI [{b_low:.2f}, {b_high:.2f}], {BAND_SHARE:.0%} within ×{k:.2g}"
+            + (f", {zeros} with a 0 left out" if zeros else ""))
+
+
+def proxy_fit_and_scores(ax, xs: list[int], xs_per_gate: list[int], ys: list[int], sizes: list[int], x_lo: float,
+                         x_end: float, y_lo: float) -> list[str]:
+    """For a proxy (x) of a different compiled quantity (y): draw the power-law fit of the abstract model with its band and a
+    proportional reference, and add the legend sections correlation (does the order of the circuits agree?) and
+    proportionality (does y grow by a fixed factor with x?), both for the counts and per anchor (circuit size removed, as
+    both grow with it). Returns the section headers."""
+    fit = power_law_fit(xs, ys)
+    if fit:
+        b, _, _, c, k, _ = fit
+        fit_xs = np.geomspace(x_lo, x_end, 200)  # only in the log part of the axes
+        fit_ys = c * fit_xs ** b
+        ax.fill_between(fit_xs, np.maximum(fit_ys / k, y_lo), np.maximum(fit_ys * k, y_lo), color=FIT, alpha=0.1, linewidth=0,
+                        zorder=1, label=f"{BAND_SHARE:.0%} of the circuits (within ×{k:.2g} of the fit)")
+        ax.plot(fit_xs, np.where(fit_ys >= y_lo, fit_ys, np.nan), color=FIT, alpha=0.6, linewidth=2, zorder=2,
+                label=f"power-law fit y = {c:.2g} · x^{b:.2f} of the abstract model (robust, Theil-Sen)")
+        ratio = np.median([y / x for x, y in zip(xs, ys) if x > 0 and y > 0])
+        ax.plot(fit_xs, np.where(ratio * fit_xs >= y_lo, ratio * fit_xs, np.nan), color=REFERENCE, linewidth=3,
+                zorder=2, label=f"proportional (b = 1) with the median ratio y / x = {ratio:.2g}")
+
+    rng = np.random.default_rng(0)
+    per_anchor = lambda counts: [n / max(size, 1) for n, size in zip(counts, sizes)]
+    models = (("abstract", xs, ABSTRACT_MARKER), ("per-gate", xs_per_gate, PER_GATE_MARKER))
+    headers = ["Correlation: is the order of the circuits the same?",
+               "Proportionality: log-log fit y = c · x^b (b = 1: proportional)"]
+    ax.plot([], [], linestyle="none", label=headers[0])
+    for name, model_xs, marker in models:
+        ax.plot([], [], **marker, label=f"{name} model, raw counts: {correlation(model_xs, ys, rng)}")
+        ax.plot([], [], linestyle="none", label=f"    per anchor (bias due to circuit size removed):\n        {correlation(per_anchor(model_xs), per_anchor(ys), rng)}")
+    ax.plot([], [], linestyle="none", label=headers[1])
+    for name, model_xs, marker in models:
+        ax.plot([], [], **marker, label=f"{name} model, raw counts: {proportionality(power_law_fit(model_xs, ys))}")
+        ax.plot([], [], linestyle="none",
+                label=f"    per anchor (bias due to circuit size removed):\n        {proportionality(power_law_fit(per_anchor(model_xs), per_anchor(ys)))}")
+    return headers
 
 
 def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix: str) -> None:
@@ -302,7 +423,7 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
         xs = [c[x_key] for c in scores]
         xs_per_gate = [c[per_gate_key] for c in scores]
         ys = [c[y_key] for c in scores]
-        fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
+        fig, ax = plt.subplots(figsize=(7, 7.6) if same_quantity else (7.6, 9), facecolor=SURFACE)  # proxy: longer, wider legend
 
         # logarithmic axes (counts over orders of magnitude, zeros in their own strip), and the y = x line if both axes show
         # the same quantity; the dots are drawn at their axis positions (px, py), the fits and scores use the counts
@@ -315,19 +436,7 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
             diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
             ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²); not next to the y = x line (too busy)
         subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
-        if not same_quantity and len(set(xs)) >= 2 and len(set(ys)) >= 2:
-            slope, intercept, slope_low, slope_high = theilslopes(ys, xs)
-            fit_xs = np.geomspace(x_lo, x_end, 500)  # sampled, as a line is curved on the log axes; only in their log part
-            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
-            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=2, zorder=2,
-                    label=f"robust fit (Theil-Sen), slope 95% CI {slope_low:.2f}–{slope_high:.2f}")
-            slope, intercept = np.polyfit(xs, ys, 1)
-            r_squared = np.corrcoef(xs, ys)[0, 1] ** 2
-            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
-            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=1.2,
-                    linestyle="--", zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
@@ -336,16 +445,21 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
         for i, (x, y, qubit) in enumerate(zip(px, py, qubits)):
             ax.scatter([x], [y], s=56, color=SURFACE, edgecolors=SURFACE, linewidths=1.6, zorder=circuit_zorder(i))
             ax.scatter([x], [y], s=56, color=points.to_rgba(qubit), linewidths=0, zorder=circuit_zorder(i) + 2e-5)
-        ax.plot([], [], marker="o", markersize=7, linestyle="none", color=SERIES,
-                label=f"abstract model ({agreement(xs, ys, same_quantity)})")
-        ax.plot([], [], marker="o", markersize=6, linestyle="none", markerfacecolor="none", markeredgecolor=PER_GATE,
-                markeredgewidth=1.4, label=f"per-gate model ({agreement(xs_per_gate, ys, same_quantity)})")
+        headers = []  # bold legend section headers
+        if same_quantity:
+            headers = equivalence_scores(ax, xs, xs_per_gate, ys, [c["anchors"] for c in scores], diagonal[0], x_end)
+        else:  # a proxy: correlation and proportionality instead of equivalence
+            headers = proxy_fit_and_scores(ax, xs, xs_per_gate, ys, [c["anchors"] for c in scores], x_lo, x_end, y_lo)
         colorbar = fig.colorbar(points, ax=ax, ticks=QUBIT_TICKS, fraction=0.05, pad=0.03)
         colorbar.set_label("qubits in circuit", color=TEXT_SECONDARY, fontsize=10)
         colorbar.outline.set_visible(False)
         colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
 
         style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label)
+        for text in ax.get_legend().get_texts():
+            if text.get_text() in headers:
+                text.set_fontweight("bold")
+                text.set_color(TEXT)
         connect_per_gate(fig, ax, px, px_per_gate, py)  # after the layout is fixed
         fig.savefig(f"{file_prefix}__{name}.png", dpi=DPI, facecolor=SURFACE)
         plt.close(fig)
@@ -658,7 +772,7 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
         xs = [c[x_key] for c in scores]
         xs_per_gate = [c[per_gate_key] for c in scores]
         ys = [c[y_key] for c in scores]
-        fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
+        fig, ax = plt.subplots(figsize=(7, 7.6) if same_quantity else (7.6, 9), facecolor=SURFACE)  # proxy: longer, wider legend
 
         # logarithmic axes (counts over orders of magnitude, zeros in their own strip), and the y = x line if both axes show
         # the same quantity; the dots are drawn at their axis positions (px, py), the fits and scores use the counts
@@ -671,19 +785,7 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
             diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
             ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²); not next to the y = x line (too busy)
         subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
-        if not same_quantity and len(set(xs)) >= 2 and len(set(ys)) >= 2:
-            slope, intercept, slope_low, slope_high = theilslopes(ys, xs)
-            fit_xs = np.geomspace(x_lo, x_end, 500)  # sampled, as a line is curved on the log axes; only in their log part
-            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
-            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=2, zorder=2,
-                    label=f"robust fit (Theil-Sen), slope 95% CI {slope_low:.2f}–{slope_high:.2f}")
-            slope, intercept = np.polyfit(xs, ys, 1)
-            r_squared = np.corrcoef(xs, ys)[0, 1] ** 2
-            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
-            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=1.2,
-                    linestyle="--", zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
@@ -692,16 +794,21 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
         for i, (x, y, qubit) in enumerate(zip(px, py, qubits)):
             ax.scatter([x], [y], s=56, color=SURFACE, edgecolors=SURFACE, linewidths=1.6, zorder=circuit_zorder(i))
             ax.scatter([x], [y], s=56, color=points.to_rgba(qubit), linewidths=0, zorder=circuit_zorder(i) + 2e-5)
-        ax.plot([], [], marker="o", markersize=7, linestyle="none", color=SERIES,
-                label=f"abstract model ({agreement(xs, ys, same_quantity)})")
-        ax.plot([], [], marker="o", markersize=6, linestyle="none", markerfacecolor="none", markeredgecolor=PER_GATE,
-                markeredgewidth=1.4, label=f"per-gate model ({agreement(xs_per_gate, ys, same_quantity)})")
+        headers = []  # bold legend section headers
+        if same_quantity:
+            headers = equivalence_scores(ax, xs, xs_per_gate, ys, [c["anchors"] for c in scores], diagonal[0], x_end)
+        else:  # a proxy: correlation and proportionality instead of equivalence
+            headers = proxy_fit_and_scores(ax, xs, xs_per_gate, ys, [c["anchors"] for c in scores], x_lo, x_end, y_lo)
         colorbar = fig.colorbar(points, ax=ax, ticks=QUBIT_TICKS, fraction=0.05, pad=0.03)
         colorbar.set_label("qubits in circuit", color=TEXT_SECONDARY, fontsize=10)
         colorbar.outline.set_visible(False)
         colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
 
         style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label)
+        for text in ax.get_legend().get_texts():
+            if text.get_text() in headers:
+                text.set_fontweight("bold")
+                text.set_color(TEXT)
         connect_per_gate(fig, ax, px, px_per_gate, py)  # after the layout is fixed
         fig.savefig(f"{file_prefix}__{name}.png", dpi=DPI, facecolor=SURFACE)
         plt.close(fig)
@@ -963,7 +1070,7 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
         xs = [c[x_key] for c in scores]
         xs_per_gate = [c[per_gate_key] for c in scores]
         ys = [c[y_key] for c in scores]
-        fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
+        fig, ax = plt.subplots(figsize=(7, 7.6) if same_quantity else (7.6, 9), facecolor=SURFACE)  # proxy: longer, wider legend
 
         # logarithmic axes (counts over orders of magnitude, zeros in their own strip), and the y = x line if both axes show
         # the same quantity; the dots are drawn at their axis positions (px, py), the fits and scores use the counts
@@ -976,19 +1083,7 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
             diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
             ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²); not next to the y = x line (too busy)
         subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
-        if not same_quantity and len(set(xs)) >= 2 and len(set(ys)) >= 2:
-            slope, intercept, slope_low, slope_high = theilslopes(ys, xs)
-            fit_xs = np.geomspace(x_lo, x_end, 500)  # sampled, as a line is curved on the log axes; only in their log part
-            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
-            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=2, zorder=2,
-                    label=f"robust fit (Theil-Sen), slope 95% CI {slope_low:.2f}–{slope_high:.2f}")
-            slope, intercept = np.polyfit(xs, ys, 1)
-            r_squared = np.corrcoef(xs, ys)[0, 1] ** 2
-            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
-            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=1.2,
-                    linestyle="--", zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
@@ -997,16 +1092,21 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
         for i, (x, y, qubit) in enumerate(zip(px, py, qubits)):
             ax.scatter([x], [y], s=56, color=SURFACE, edgecolors=SURFACE, linewidths=1.6, zorder=circuit_zorder(i))
             ax.scatter([x], [y], s=56, color=points.to_rgba(qubit), linewidths=0, zorder=circuit_zorder(i) + 2e-5)
-        ax.plot([], [], marker="o", markersize=7, linestyle="none", color=SERIES,
-                label=f"abstract model ({agreement(xs, ys, same_quantity)})")
-        ax.plot([], [], marker="o", markersize=6, linestyle="none", markerfacecolor="none", markeredgecolor=PER_GATE,
-                markeredgewidth=1.4, label=f"per-gate model ({agreement(xs_per_gate, ys, same_quantity)})")
+        headers = []  # bold legend section headers
+        if same_quantity:
+            headers = equivalence_scores(ax, xs, xs_per_gate, ys, [c["anchors"] for c in scores], diagonal[0], x_end)
+        else:  # a proxy: correlation and proportionality instead of equivalence
+            headers = proxy_fit_and_scores(ax, xs, xs_per_gate, ys, [c["anchors"] for c in scores], x_lo, x_end, y_lo)
         colorbar = fig.colorbar(points, ax=ax, ticks=QUBIT_TICKS, fraction=0.05, pad=0.03)
         colorbar.set_label("qubits in circuit", color=TEXT_SECONDARY, fontsize=10)
         colorbar.outline.set_visible(False)
         colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
 
         style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label)
+        for text in ax.get_legend().get_texts():
+            if text.get_text() in headers:
+                text.set_fontweight("bold")
+                text.set_color(TEXT)
         connect_per_gate(fig, ax, px, px_per_gate, py)  # after the layout is fixed
         fig.savefig(f"{file_prefix}__{name}.png", dpi=DPI, facecolor=SURFACE)
         plt.close(fig)
@@ -1121,7 +1221,8 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
     # event amount: per qubit its share of the circuit's abstract swaps vs of its compiled swaps
     plot_event_amount(qubit_shares, f"{config}: event amount vs compiled swaps",
                       "qubit's share of the circuit's compiled swaps", "qubit's share of the abstract swaps",
-                      "above: more abstract events than its compiled share, below: less", f"{file_prefix}__event_amount.png")
+                      "above: more abstract events than its compiled share, below: less", f"{file_prefix}__event_amount.png",
+                      zero_events="swaps")
 
     # table of the per-circuit scores (empty = undefined, e.g. no swap slot in the circuit)
     with open(f"{file_prefix}__distribution.csv", "w", newline="") as f:
