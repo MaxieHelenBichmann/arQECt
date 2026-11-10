@@ -8,15 +8,43 @@ from pathlib import Path
 
 import stim
 import yaml
+from collections.abc import Callable
+
+from src.models.hardware import HardwareModel, HardwareEvents
 
 from benchmarks.model_accuracy.compilation import (run_ti_compiler, run_na_compiler, run_sc_compiler, run_ti_abstraction, run_na_abstraction,
                                                    run_sc_abstraction, run_ti_baseline, run_na_baseline, run_sc_baseline)
-from benchmarks.model_accuracy.architecture_preparation import prepare_ti_hardware, prepare_na_hardware, prepare_sc_hardware
+from benchmarks.model_accuracy.architecture_preparation import prepare_ti_hardware, prepare_na_hardware, prepare_sc_hardware, HardwareArchitecture
 from benchmarks.model_accuracy.visualization import visualize
 
 _CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / "configs"
 _CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / "circuits"
 _RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "model_accuracy"
+
+_PREPARE_HARDWARE : dict[str, Callable[[dict, int], tuple[HardwareModel, HardwareArchitecture | dict]]] = {
+    "TI": prepare_ti_hardware,
+    "NA": prepare_na_hardware,
+    "SC": prepare_sc_hardware
+}
+
+_RUN_BASELINE : dict[str, Callable[[stim.Circuit], tuple[HardwareModel, HardwareModel | dict]]] = {
+    "TI": run_ti_baseline,
+    "NA": run_na_baseline,
+    "SC": run_sc_baseline
+}
+
+_RUN_ABSTRACTION : dict[str, Callable[[HardwareModel,  stim.Circuit], tuple[HardwareModel, HardwareModel | dict]]] = {
+    "TI": run_ti_abstraction,
+    "NA": run_na_abstraction,
+    "SC": run_sc_abstraction
+}
+
+_RUN_COMPILER : dict[str, Callable[[HardwareArchitecture | dict, stim.Circuit, float], tuple[HardwareModel, HardwareModel | dict]]] = {
+    "TI": run_ti_compiler,
+    "NA": run_na_compiler,
+    "SC": run_sc_compiler
+}
+
 
 def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_pattern: str = "*",
         max_qubits: int | None = None, max_compile_time: float = 600.0, visualize_true: bool = True, clean: bool = False,
@@ -51,102 +79,38 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
             configs.append(config)
     print(f"Collected {len(configs)} hardware configurations...")
 
-    # run abstract execution and compilation for each hardware config and circuit
-    for config in configs:
-        if config["platform"] == "TI":
-            for circuit_name, circuit in circuits.items():
-                if append and (_RESULTS_DIR / "ti" / "raw" / f"{config['name']}__{circuit_name}.csv").exists():
-                    print(f"[{config["platform"]}] Skipping {circuit_name} on ({config["name"]}): raw result already exists")
-                    continue
+    # run baseline, my abstract execution, and compilation for each hardware config and circuit
+    for config in configs:  
+        for circuit_name, circuit in circuits.items():
+            if append and (_RESULTS_DIR / config["platform"].lower() / "raw" / f"{config['name']}__{circuit_name}.csv").exists():
+                print(f"[{config["platform"]}] Skipping {circuit_name} on ({config["name"]}): raw result already exists")
+                continue
 
-                anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
-                                  if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
-                                  or stim.gate_data(op.name).is_reset)
-                
-                abstract_hardware, concrete_hardware = prepare_ti_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
+            anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
+                                if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
+                                or stim.gate_data(op.name).is_reset)
+            
+            abstract_hardware, concrete_hardware = _PREPARE_HARDWARE[config["platform"]](parameters=config["architecture"], num_qubits=circuit.num_qubits)
 
-                print(f"[{config["platform"]}] Running baseline execution of {circuit_name} on ({config["name"]})...")
-                baseline_hardware_events, baseline_details = run_ti_baseline(circuit)
-                print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
-                abstract_hardware_events, abstraction_details = run_ti_abstraction(hardware=abstract_hardware, circuit=circuit)
-                print(f"[{config["platform"]}] Running compilation of        {circuit_name} on ({config["name"]})...")
-                try:
-                    concrete_hardware_events, compiler_details = run_ti_compiler(hardware=concrete_hardware, circuit=circuit, max_compile_time=max_compile_time)
-                except (RuntimeError, TimeoutError) as error:
-                    print(f"Skipped {config['name']} / {circuit_name}: {error}")
-                    continue
+            print(f"[{config["platform"]}] Running baseline execution of {circuit_name} on ({config["name"]})...")
+            baseline_hardware_events, baseline_details = _RUN_BASELINE[config["platform"]](circuit)
+            print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
+            abstract_hardware_events, abstraction_details = _RUN_ABSTRACTION[config["platform"]](hardware=abstract_hardware, circuit=circuit)
+            print(f"[{config["platform"]}] Running compilation of        {circuit_name} on ({config["name"]})...")
+            try:
+                concrete_hardware_events, compiler_details = _RUN_COMPILER[config["platform"]](hardware=concrete_hardware, circuit=circuit, max_compile_time=max_compile_time)
+            except (RuntimeError, TimeoutError) as error:
+                print(f"Skipped {config['name']} / {circuit_name}: {error}")
+                continue
 
-                metadata = {"config": config["name"], "platform": config["platform"], **config["architecture"],
-                            "circuit": circuit_name, "num_qubits": circuit.num_qubits}
-                save_raw_results(_RESULTS_DIR / "ti" / "raw" / f"{config['name']}__{circuit_name}.csv", metadata,
-                                 anchors={qubit: anchors[qubit] for qubit in range(circuit.num_qubits)},
-                                 abstract=(abstract_hardware_events, abstraction_details),
-                                 compiled=(concrete_hardware_events, compiler_details),
-                                 baseline=(baseline_hardware_events, baseline_details))
-
-        elif config["platform"] == "NA":
-            for circuit_name, circuit in circuits.items():
-                if append and (_RESULTS_DIR / "na" / "raw" / f"{config['name']}__{circuit_name}.csv").exists():
-                    print(f"[{config["platform"]}] Skipping {circuit_name} on ({config["name"]}): raw result already exists")
-                    continue
-
-                anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
-                                  if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
-                                  or stim.gate_data(op.name).is_reset)
-
-                abstract_hardware, concrete_hardware = prepare_na_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
-
-                print(f"[{config["platform"]}] Running baseline execution of {circuit_name} on ({config["name"]})...")
-                baseline_hardware_events, baseline_details = run_na_baseline(circuit)
-                print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
-                abstract_hardware_events, abstraction_details = run_na_abstraction(hardware=abstract_hardware, circuit=circuit)
-                print(f"[{config["platform"]}] Running compilation of        {circuit_name} on ({config["name"]})...")
-                try:
-                    concrete_hardware_events, compiler_details = run_na_compiler(hardware=concrete_hardware, circuit=circuit, max_compile_time=max_compile_time)
-                except (RuntimeError, TimeoutError) as error:
-                    print(f"Skipped {config['name']} / {circuit_name}: {error}")
-                    continue
-
-                metadata = {"config": config["name"], "platform": config["platform"], **config["architecture"],
-                            "circuit": circuit_name, "num_qubits": circuit.num_qubits}
-                save_raw_results(_RESULTS_DIR / "na" / "raw" / f"{config['name']}__{circuit_name}.csv", metadata,
-                                 anchors={qubit: anchors[qubit] for qubit in range(circuit.num_qubits)},
-                                 abstract=(abstract_hardware_events, abstraction_details),
-                                 compiled=(concrete_hardware_events, compiler_details),
-                                 baseline=(baseline_hardware_events, baseline_details))
-        elif config["platform"] == "SC":
-            for circuit_name, circuit in circuits.items():
-                if append and (_RESULTS_DIR / "sc" / "raw" / f"{config['name']}__{circuit_name}.csv").exists():
-                    print(f"[{config["platform"]}] Skipping {circuit_name} on ({config["name"]}): raw result already exists")
-                    continue
-
-                anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
-                                  if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
-                                  or stim.gate_data(op.name).is_reset)
-                
-                abstract_hardware, concrete_hardware = prepare_sc_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
-
-                print(f"[{config["platform"]}] Running baseline execution of {circuit_name} on ({config["name"]})...")
-                baseline_hardware_events, baseline_details = run_sc_baseline(circuit)
-                print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
-                abstract_hardware_events, abstraction_details = run_sc_abstraction(hardware=abstract_hardware, circuit=circuit)
-                print(f"[{config["platform"]}] Running compilation of        {circuit_name} on ({config["name"]})...")
-                try:
-                    concrete_hardware_events, compiler_details = run_sc_compiler(hardware=concrete_hardware, circuit=circuit, max_compile_time=max_compile_time)
-                except (RuntimeError, TimeoutError) as error:
-                    print(f"Skipped {config['name']} / {circuit_name}: {error}")
-                    continue
-
-                metadata = {"config": config["name"], "platform": config["platform"], **config["architecture"],
-                            "circuit": circuit_name, "num_qubits": circuit.num_qubits}
-                save_raw_results(_RESULTS_DIR / "sc" / "raw" / f"{config['name']}__{circuit_name}.csv", metadata,
-                                 anchors={qubit: anchors[qubit] for qubit in range(circuit.num_qubits)},
-                                 abstract=(abstract_hardware_events, abstraction_details),
-                                 compiled=(concrete_hardware_events, compiler_details),
-                                 baseline=(baseline_hardware_events, baseline_details))
-        else:
-            print(f"Unsupported platform: {config["platform"]}")
-
+            metadata = {"config": config["name"], "platform": config["platform"], **config["architecture"],
+                        "circuit": circuit_name, "num_qubits": circuit.num_qubits}
+            save_raw_results(_RESULTS_DIR / config["platform"].lower() / "raw" / f"{config['name']}__{circuit_name}.csv", metadata,
+                                anchors={qubit: anchors[qubit] for qubit in range(circuit.num_qubits)},
+                                abstract=(abstract_hardware_events, abstraction_details),
+                                compiled=(concrete_hardware_events, compiler_details),
+                                baseline=(baseline_hardware_events, baseline_details))
+    
     # evaluate the results
     if visualize_true:
         visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits, clean)

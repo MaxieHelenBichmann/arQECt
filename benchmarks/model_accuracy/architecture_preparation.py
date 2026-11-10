@@ -11,6 +11,8 @@ from mqt.ionshuttler.linear import Architecture as TIArchitecture
 from mqt.qmap.sc import Architecture as SCArchitecture
 from mqt.qmap.na.zoned import ZonedNeutralAtomArchitecture
 
+HardwareArchitecture = TIArchitecture | SCArchitecture | ZonedNeutralAtomArchitecture 
+
 def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsModel, TIArchitecture | dict]:
     """Construct a trapped ion architecture as the abstract model and the concrete MQT IonShuttler hardware.
 
