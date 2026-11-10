@@ -27,27 +27,26 @@ _PREPARE_HARDWARE : dict[str, Callable[[dict, int], tuple[HardwareModel, Hardwar
     "SC": prepare_sc_hardware
 }
 
-_RUN_BASELINE : dict[str, Callable[[stim.Circuit], tuple[HardwareModel, HardwareModel | dict]]] = {
+_RUN_BASELINE : dict[str, Callable[[stim.Circuit], tuple[HardwareModel, HardwareEvents | dict]]] = {
     "TI": run_ti_baseline,
     "NA": run_na_baseline,
     "SC": run_sc_baseline
 }
 
-_RUN_ABSTRACTION : dict[str, Callable[[HardwareModel,  stim.Circuit], tuple[HardwareModel, HardwareModel | dict]]] = {
+_RUN_ABSTRACTION : dict[str, Callable[[HardwareModel,  stim.Circuit], tuple[HardwareModel, HardwareEvents | dict]]] = {
     "TI": run_ti_abstraction,
     "NA": run_na_abstraction,
     "SC": run_sc_abstraction
 }
 
-_RUN_COMPILER : dict[str, Callable[[HardwareArchitecture | dict, stim.Circuit, float], tuple[HardwareModel, HardwareModel | dict]]] = {
+_RUN_COMPILER : dict[str, Callable[[HardwareArchitecture | dict, stim.Circuit, float], tuple[HardwareModel, HardwareEvents | dict]]] = {
     "TI": run_ti_compiler,
     "NA": run_na_compiler,
     "SC": run_sc_compiler
 }
 
 
-def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_pattern: str = "*",
-        max_qubits: int | None = None, max_compile_time: float = 600.0, visualize_true: bool = True, clean: bool = False,
+def run(platforms: list[str] | None = None, max_qubits: int | None = None, max_compile_time: float = 600.0, clean: bool = False,
         append: bool = False, only_visual: bool = False) -> None:
     if only_visual:
         visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits, clean)
@@ -63,7 +62,7 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
 
     # collect different circuits
     circuits = {}
-    for circuit_file in sorted(_CIRCUIT_DIR.glob(f"{circuit_pattern}.stim")):
+    for circuit_file in sorted(_CIRCUIT_DIR.glob("*.stim")):
         name = circuit_file.stem
         circuit = stim.Circuit.from_file(circuit_file)
         if max_qubits is None or circuit.num_qubits <= max_qubits:
@@ -72,7 +71,7 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
 
     # collect different hardware configs
     configs = []
-    for config_file in sorted(_CONFIG_DIR.glob(f"{config_pattern}.yaml")):
+    for config_file in sorted(_CONFIG_DIR.glob("*.yaml")):
         with open(config_file) as f:
                 config = yaml.safe_load(f)
         if platforms is None or config["platform"] in platforms:
@@ -112,8 +111,7 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
                                 baseline=(baseline_hardware_events, baseline_details))
     
     # evaluate the results
-    if visualize_true:
-        visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits, clean)
+    visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits, clean)
 
 
 def save_raw_results(file: Path, metadata: dict, anchors: dict[int, int], abstract: tuple, compiled: tuple, baseline: tuple) -> None:
@@ -150,11 +148,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compare abstract executions and compilations of circuits on hardware configs.")
     parser.add_argument("--platform", nargs="+", choices=["TI", "NA", "SC"], default=None,
                         help="only run configs of these platforms (default: all)")
-    parser.add_argument("--circuits", default="*", help="glob pattern for circuit file names, without .stim (default: all)")
-    parser.add_argument("--configs", default="*", help="glob pattern for config file names, without .yaml (default: all)")
     parser.add_argument("--max-qubits", type=int, default=None, help="skip circuits with more qubits (default: no limit)")
     parser.add_argument("--max-compile-time", type=float, default=600.0, help="time limit per compilation in seconds (default: 600)")
-    parser.add_argument("--no-visualize", action="store_true", help="only write the raw results, no plots")
     parser.add_argument("--clean", action="store_true",
                         help="delete all files in the raw result directories of the run platforms before running, and all previous "
                              "plot CSVs before visualizing (without it, only the previous plot PNGs are deleted)")
@@ -164,7 +159,6 @@ if __name__ == "__main__":
                         help="skip running, only visualize the existing raw results of the selected platforms")
     args = parser.parse_args()
 
-    run(platforms=args.platform, circuit_pattern=args.circuits, config_pattern=args.configs, max_qubits=args.max_qubits,
-        max_compile_time=args.max_compile_time, visualize_true=not args.no_visualize, clean=args.clean, append=args.append,
-        only_visual=args.only_visual)
+    run(platforms=args.platform, max_qubits=args.max_qubits, max_compile_time=args.max_compile_time, clean=args.clean,
+        append=args.append, only_visual=args.only_visual)
 
