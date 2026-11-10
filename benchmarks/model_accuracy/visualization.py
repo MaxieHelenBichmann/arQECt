@@ -405,8 +405,7 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
         })
     scores.sort(key=lambda c: c["num_qubits"])  # larger circuits drawn on top
     qubits = [c["num_qubits"] for c in scores]
-    mean_compile_s = np.mean([c["compiled_wall_clock_s"] for c in scores])
-    mean_abstract_s = np.mean([c["abstract_wall_clock_s"] for c in scores])
+    mean_speedup = np.mean([c["compiled_wall_clock_s"] / c["abstract_wall_clock_s"] for c in scores])  # per-circuit quotient, then mean
 
     # 2) the plots: (file name, title, x column, per-gate x column, y column, x label, y label, same quantity on both axes)
     plots = [
@@ -436,7 +435,7 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
             diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
             ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
+        subtitle = f"number of circuits = {len(xs)}   avg. speedup of abstract execution vs compilation: {mean_speedup:.3g}×"
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
@@ -754,8 +753,7 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
         })
     scores.sort(key=lambda c: c["num_qubits"])  # larger circuits drawn on top
     qubits = [c["num_qubits"] for c in scores]
-    mean_compile_s = np.mean([c["compiled_wall_clock_s"] for c in scores])
-    mean_abstract_s = np.mean([c["abstract_wall_clock_s"] for c in scores])
+    mean_speedup = np.mean([c["compiled_wall_clock_s"] / c["abstract_wall_clock_s"] for c in scores])  # per-circuit quotient, then mean
 
     # 2) the plots: (file name, title, x column, per-gate x column, y column, x label, y label, same quantity on both axes)
     plots = [
@@ -785,7 +783,7 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
             diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
             ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
+        subtitle = f"number of circuits = {len(xs)}   avg. speedup of abstract execution vs compilation: {mean_speedup:.3g}×"
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
@@ -1058,8 +1056,7 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
         })
     scores.sort(key=lambda c: c["num_qubits"])  # larger circuits drawn on top
     qubits = [c["num_qubits"] for c in scores]
-    mean_compile_s = np.mean([c["compiled_wall_clock_s"] for c in scores])
-    mean_abstract_s = np.mean([c["abstract_wall_clock_s"] for c in scores])
+    mean_speedup = np.mean([c["compiled_wall_clock_s"] / c["abstract_wall_clock_s"] for c in scores])  # per-circuit quotient, then mean
 
     # 2) the plots: (file name, title, x column, per-gate x column, y column, x label, y label, same quantity on both axes)
     plots = [
@@ -1083,7 +1080,7 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
             diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
             ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
+        subtitle = f"number of circuits = {len(xs)}   avg. speedup of abstract execution vs compilation: {mean_speedup:.3g}×"
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
