@@ -59,14 +59,13 @@ SC_SWAPS = "virtual_swap"  # abstract and compiled event
 SC_COMPILED_SWAPS = "swaps"  # compiled detail, the same SWAPs as the compiled virtual_swap events
 
 
-def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = None, clean: bool = False) -> None:
-    """Write the plots (and their CSV tables) of the given platforms; removes the previous plots first, with `clean` also the previous CSVs."""
-    old_outputs = "*" if clean else "*.png"
+def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = None) -> None:
+    """Write the plots (and their CSV tables) of the given platforms; removes the previous plots and CSVs first."""
     if "TI" in platform:
         out_dir = results_dir / "ti" / "plots"
         out_dir.mkdir(parents=True, exist_ok=True)
          
-        for old_file in out_dir.glob(f"ti_{old_outputs}"):  # remove previous TI outputs (also of configs that no longer have results)
+        for old_file in out_dir.glob("ti_*"):  # remove previous TI outputs (also of configs that no longer have results)
             old_file.unlink()
         runs = defaultdict(list)  # config -> the raw rows of each circuit
         for file in sorted((results_dir / "ti" / "raw").glob("*.csv")):
@@ -82,7 +81,7 @@ def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = N
         out_dir = results_dir / "na" / "plots"
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        for old_file in out_dir.glob(f"na_{old_outputs}"):  # remove previous NA outputs (also of configs that no longer have results)
+        for old_file in out_dir.glob("na_*"):  # remove previous NA outputs (also of configs that no longer have results)
             old_file.unlink()
         runs = defaultdict(list)  # config -> the raw rows of each circuit
         for file in sorted((results_dir / "na" / "raw").glob("*.csv")):
@@ -98,7 +97,7 @@ def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = N
         out_dir = results_dir / "sc" / "plots"
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        for old_file in out_dir.glob(f"sc_{old_outputs}"):  # remove previous SC outputs (also of configs that no longer have results)
+        for old_file in out_dir.glob("sc_*"):  # remove previous SC outputs (also of configs that no longer have results)
             old_file.unlink()
         runs = defaultdict(list)  # config -> the raw rows of each circuit
         for file in sorted((results_dir / "sc" / "raw").glob("*.csv")):
@@ -181,6 +180,34 @@ def plot_event_amount(qubit_shares: list[tuple[float, float, int]], title: str, 
     plt.close(fig)
 
 
+COUNT_TICKS = (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000)
+
+
+def log_count_range(counts: list[int]) -> tuple[float, float, float | None]:
+    """Range of a logarithmic count axis: (start of the log part, end, axis position of 0 or None if there are no zeros).
+    As in plot_event_amount, zeros get their own strip at the axis start, below a break."""
+    lo = min([c for c in counts if c > 0], default=1) / 1.3
+    return lo, max([*counts, 1]) * 1.3, lo / 2.2 if 0 in counts else None
+
+
+def set_log_count_axis(ax, axis: str, lo: float, end: float, zero_at: float | None) -> None:
+    """Make the x or y axis a logarithmic count axis (see log_count_range), with a dashed break before the zero strip."""
+    set_scale, set_lim, set_ticks, break_line = ((ax.set_xscale, ax.set_xlim, ax.set_xticks, ax.axvline) if axis == "x"
+                                                 else (ax.set_yscale, ax.set_ylim, ax.set_yticks, ax.axhline))
+    set_scale("log")
+    set_lim(lo / 3.2 if zero_at else lo, end)
+    ticks = [t for t in COUNT_TICKS if lo <= t <= end and (end / lo < 1000 or str(t)[0] == "1")]  # wide range: decades only
+    set_ticks([zero_at, *ticks] if zero_at else ticks, [*(["0"] if zero_at else []), *(f"{t:g}" for t in ticks)])
+    ax.minorticks_off()
+    if zero_at:
+        break_line(lo / 1.4, color=BASELINE, linewidth=1, linestyle=(0, (4, 3)), zorder=1.5)
+
+
+def on_log_count_axis(counts: list[int], zero_at: float | None) -> list[float]:
+    """Axis positions of counts: zeros are drawn in the zero strip."""
+    return [c if c > 0 else zero_at for c in counts]
+
+
 def circuit_zorder(i: int) -> float:
     """Drawing order of the i-th circuit's dot in the aggregated plots: outline at +0, connecting line at +1e-5, fill at +2e-5."""
     return 4 + i * 3e-5
@@ -189,12 +216,12 @@ def circuit_zorder(i: int) -> float:
 def connect_per_gate(fig, ax, xs: list[float], xs_per_gate: list[float], ys: list[float]) -> None:
     """Connect the two points of each circuit with a horizontal line: from the abstract model's dot (under its fill, over its
     outline) to the outer edge of the per-gate model's ring. Needs the final layout, as the ring radius is converted from points."""
-    x_start, x_end = ax.get_xlim()
-    points_to_data = (x_end - x_start) / (ax.get_window_extent().width * 72 / fig.dpi)
-    ring_radius = (math.sqrt(RING_SIZE) / 2 + RING_WIDTH / 2) * points_to_data
+    ring_radius = (math.sqrt(RING_SIZE) / 2 + RING_WIDTH / 2) * fig.dpi / 72  # in pixels (the axes may be logarithmic)
     for i, (x, x_per_gate, y) in enumerate(zip(xs, xs_per_gate, ys)):
-        if abs(x_per_gate - x) > ring_radius:
-            ax.plot([x, x_per_gate - math.copysign(ring_radius, x_per_gate - x)], [y, y], color=BASELINE, linewidth=0.8,
+        (px, py), (px_per_gate, _) = ax.transData.transform([(x, y), (x_per_gate, y)])
+        if abs(px_per_gate - px) > ring_radius:
+            x_line_end = ax.transData.inverted().transform((px_per_gate - math.copysign(ring_radius, px_per_gate - px), py))[0]
+            ax.plot([x, x_line_end], [y, y], color=BASELINE, linewidth=0.8,
                     solid_capstyle="butt", zorder=circuit_zorder(i) + 1e-5)
 
 
@@ -276,34 +303,37 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
         xs_per_gate = [c[per_gate_key] for c in scores]
         ys = [c[y_key] for c in scores]
         fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # counts: integer ticks only
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
-        # axis ranges, and the y = x line if both axes show the same quantity
-        x_end = max([*xs, *xs_per_gate, 1]) * 1.08
-        y_end = max([*ys, 1]) * 1.08
+        # logarithmic axes (counts over orders of magnitude, zeros in their own strip), and the y = x line if both axes show
+        # the same quantity; the dots are drawn at their axis positions (px, py), the fits and scores use the counts
+        x_lo, x_end, x_zero = log_count_range([*xs, *xs_per_gate, *(ys if same_quantity else [])])
+        y_lo, y_end, y_zero = (x_lo, x_end, x_zero) if same_quantity else log_count_range(ys)
+        set_log_count_axis(ax, "x", x_lo, x_end, x_zero)
+        set_log_count_axis(ax, "y", y_lo, y_end, y_zero)
+        px, px_per_gate, py = on_log_count_axis(xs, x_zero), on_log_count_axis(xs_per_gate, x_zero), on_log_count_axis(ys, y_zero)
         if same_quantity:
-            x_end = y_end = max(x_end, y_end)
-            ax.plot([0, x_end], [0, x_end], color=REFERENCE, linewidth=3, zorder=2, label="exact match")
-        ax.set_xlim(0, x_end)
-        ax.set_ylim(0, y_end)
+            diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
+            ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²)
+        # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²); not next to the y = x line (too busy)
         subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
-        if len(set(xs)) >= 2 and len(set(ys)) >= 2:
+        if not same_quantity and len(set(xs)) >= 2 and len(set(ys)) >= 2:
             slope, intercept, slope_low, slope_high = theilslopes(ys, xs)
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=2, zorder=2,
+            fit_xs = np.geomspace(x_lo, x_end, 500)  # sampled, as a line is curved on the log axes; only in their log part
+            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
+            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=2, zorder=2,
                     label=f"robust fit (Theil-Sen), slope 95% CI {slope_low:.2f}–{slope_high:.2f}")
             slope, intercept = np.polyfit(xs, ys, 1)
             r_squared = np.corrcoef(xs, ys)[0, 1] ** 2
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=1.2,
+            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
+            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=1.2,
                     linestyle="--", zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
-        ax.scatter(xs_per_gate, ys, s=RING_SIZE, facecolors="none", edgecolors=PER_GATE, linewidths=RING_WIDTH, zorder=3)
+        ax.scatter(px_per_gate, py, s=RING_SIZE, facecolors="none", edgecolors=PER_GATE, linewidths=RING_WIDTH, zorder=3)
         points = ScalarMappable(Normalize(QUBIT_MIN, QUBIT_MAX), QUBIT_CMAP)
-        for i, (x, y, qubit) in enumerate(zip(xs, ys, qubits)):
+        for i, (x, y, qubit) in enumerate(zip(px, py, qubits)):
             ax.scatter([x], [y], s=56, color=SURFACE, edgecolors=SURFACE, linewidths=1.6, zorder=circuit_zorder(i))
             ax.scatter([x], [y], s=56, color=points.to_rgba(qubit), linewidths=0, zorder=circuit_zorder(i) + 2e-5)
         ax.plot([], [], marker="o", markersize=7, linestyle="none", color=SERIES,
@@ -316,7 +346,7 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
         colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
 
         style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label)
-        connect_per_gate(fig, ax, xs, xs_per_gate, ys)  # after the layout is fixed
+        connect_per_gate(fig, ax, px, px_per_gate, py)  # after the layout is fixed
         fig.savefig(f"{file_prefix}__{name}.png", dpi=DPI, facecolor=SURFACE)
         plt.close(fig)
 
@@ -629,34 +659,37 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
         xs_per_gate = [c[per_gate_key] for c in scores]
         ys = [c[y_key] for c in scores]
         fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # counts: integer ticks only
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
-        # axis ranges, and the y = x line if both axes show the same quantity
-        x_end = max([*xs, *xs_per_gate, 1]) * 1.08
-        y_end = max([*ys, 1]) * 1.08
+        # logarithmic axes (counts over orders of magnitude, zeros in their own strip), and the y = x line if both axes show
+        # the same quantity; the dots are drawn at their axis positions (px, py), the fits and scores use the counts
+        x_lo, x_end, x_zero = log_count_range([*xs, *xs_per_gate, *(ys if same_quantity else [])])
+        y_lo, y_end, y_zero = (x_lo, x_end, x_zero) if same_quantity else log_count_range(ys)
+        set_log_count_axis(ax, "x", x_lo, x_end, x_zero)
+        set_log_count_axis(ax, "y", y_lo, y_end, y_zero)
+        px, px_per_gate, py = on_log_count_axis(xs, x_zero), on_log_count_axis(xs_per_gate, x_zero), on_log_count_axis(ys, y_zero)
         if same_quantity:
-            x_end = y_end = max(x_end, y_end)
-            ax.plot([0, x_end], [0, x_end], color=REFERENCE, linewidth=3, zorder=2, label="exact match")
-        ax.set_xlim(0, x_end)
-        ax.set_ylim(0, y_end)
+            diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
+            ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²)
+        # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²); not next to the y = x line (too busy)
         subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
-        if len(set(xs)) >= 2 and len(set(ys)) >= 2:
+        if not same_quantity and len(set(xs)) >= 2 and len(set(ys)) >= 2:
             slope, intercept, slope_low, slope_high = theilslopes(ys, xs)
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=2, zorder=2,
+            fit_xs = np.geomspace(x_lo, x_end, 500)  # sampled, as a line is curved on the log axes; only in their log part
+            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
+            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=2, zorder=2,
                     label=f"robust fit (Theil-Sen), slope 95% CI {slope_low:.2f}–{slope_high:.2f}")
             slope, intercept = np.polyfit(xs, ys, 1)
             r_squared = np.corrcoef(xs, ys)[0, 1] ** 2
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=1.2,
+            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
+            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=1.2,
                     linestyle="--", zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
-        ax.scatter(xs_per_gate, ys, s=RING_SIZE, facecolors="none", edgecolors=PER_GATE, linewidths=RING_WIDTH, zorder=3)
+        ax.scatter(px_per_gate, py, s=RING_SIZE, facecolors="none", edgecolors=PER_GATE, linewidths=RING_WIDTH, zorder=3)
         points = ScalarMappable(Normalize(QUBIT_MIN, QUBIT_MAX), QUBIT_CMAP)
-        for i, (x, y, qubit) in enumerate(zip(xs, ys, qubits)):
+        for i, (x, y, qubit) in enumerate(zip(px, py, qubits)):
             ax.scatter([x], [y], s=56, color=SURFACE, edgecolors=SURFACE, linewidths=1.6, zorder=circuit_zorder(i))
             ax.scatter([x], [y], s=56, color=points.to_rgba(qubit), linewidths=0, zorder=circuit_zorder(i) + 2e-5)
         ax.plot([], [], marker="o", markersize=7, linestyle="none", color=SERIES,
@@ -669,7 +702,7 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
         colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
 
         style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label)
-        connect_per_gate(fig, ax, xs, xs_per_gate, ys)  # after the layout is fixed
+        connect_per_gate(fig, ax, px, px_per_gate, py)  # after the layout is fixed
         fig.savefig(f"{file_prefix}__{name}.png", dpi=DPI, facecolor=SURFACE)
         plt.close(fig)
 
@@ -931,34 +964,37 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
         xs_per_gate = [c[per_gate_key] for c in scores]
         ys = [c[y_key] for c in scores]
         fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # counts: integer ticks only
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
-        # axis ranges, and the y = x line if both axes show the same quantity
-        x_end = max([*xs, *xs_per_gate, 1]) * 1.08
-        y_end = max([*ys, 1]) * 1.08
+        # logarithmic axes (counts over orders of magnitude, zeros in their own strip), and the y = x line if both axes show
+        # the same quantity; the dots are drawn at their axis positions (px, py), the fits and scores use the counts
+        x_lo, x_end, x_zero = log_count_range([*xs, *xs_per_gate, *(ys if same_quantity else [])])
+        y_lo, y_end, y_zero = (x_lo, x_end, x_zero) if same_quantity else log_count_range(ys)
+        set_log_count_axis(ax, "x", x_lo, x_end, x_zero)
+        set_log_count_axis(ax, "y", y_lo, y_end, y_zero)
+        px, px_per_gate, py = on_log_count_axis(xs, x_zero), on_log_count_axis(xs_per_gate, x_zero), on_log_count_axis(ys, y_zero)
         if same_quantity:
-            x_end = y_end = max(x_end, y_end)
-            ax.plot([0, x_end], [0, x_end], color=REFERENCE, linewidth=3, zorder=2, label="exact match")
-        ax.set_xlim(0, x_end)
-        ax.set_ylim(0, y_end)
+            diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
+            ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²)
+        # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²); not next to the y = x line (too busy)
         subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
-        if len(set(xs)) >= 2 and len(set(ys)) >= 2:
+        if not same_quantity and len(set(xs)) >= 2 and len(set(ys)) >= 2:
             slope, intercept, slope_low, slope_high = theilslopes(ys, xs)
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=2, zorder=2,
+            fit_xs = np.geomspace(x_lo, x_end, 500)  # sampled, as a line is curved on the log axes; only in their log part
+            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
+            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=2, zorder=2,
                     label=f"robust fit (Theil-Sen), slope 95% CI {slope_low:.2f}–{slope_high:.2f}")
             slope, intercept = np.polyfit(xs, ys, 1)
             r_squared = np.corrcoef(xs, ys)[0, 1] ** 2
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=1.2,
+            fit_ys = np.where(slope * fit_xs + intercept >= y_lo, slope * fit_xs + intercept, np.nan)
+            ax.plot(fit_xs, fit_ys, color=FIT, alpha=0.45, linewidth=1.2,
                     linestyle="--", zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
-        ax.scatter(xs_per_gate, ys, s=RING_SIZE, facecolors="none", edgecolors=PER_GATE, linewidths=RING_WIDTH, zorder=3)
+        ax.scatter(px_per_gate, py, s=RING_SIZE, facecolors="none", edgecolors=PER_GATE, linewidths=RING_WIDTH, zorder=3)
         points = ScalarMappable(Normalize(QUBIT_MIN, QUBIT_MAX), QUBIT_CMAP)
-        for i, (x, y, qubit) in enumerate(zip(xs, ys, qubits)):
+        for i, (x, y, qubit) in enumerate(zip(px, py, qubits)):
             ax.scatter([x], [y], s=56, color=SURFACE, edgecolors=SURFACE, linewidths=1.6, zorder=circuit_zorder(i))
             ax.scatter([x], [y], s=56, color=points.to_rgba(qubit), linewidths=0, zorder=circuit_zorder(i) + 2e-5)
         ax.plot([], [], marker="o", markersize=7, linestyle="none", color=SERIES,
@@ -971,7 +1007,7 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
         colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
 
         style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label)
-        connect_per_gate(fig, ax, xs, xs_per_gate, ys)  # after the layout is fixed
+        connect_per_gate(fig, ax, px, px_per_gate, py)  # after the layout is fixed
         fig.savefig(f"{file_prefix}__{name}.png", dpi=DPI, facecolor=SURFACE)
         plt.close(fig)
 

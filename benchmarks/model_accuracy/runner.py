@@ -49,7 +49,7 @@ _RUN_COMPILER : dict[str, Callable[[HardwareArchitecture | dict, stim.Circuit, f
 def run(platforms: list[str] | None = None, max_qubits: int | None = None, max_compile_time: float = 600.0, clean: bool = False,
         append: bool = False, only_visual: bool = False) -> None:
     if only_visual:
-        visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits, clean)
+        visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits)
         return
 
     # empty the raw result directories of the platforms that are run (so only results of this run remain)
@@ -111,7 +111,7 @@ def run(platforms: list[str] | None = None, max_qubits: int | None = None, max_c
                                 baseline=(baseline_hardware_events, baseline_details))
     
     # evaluate the results
-    visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits, clean)
+    visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits)
 
 
 def save_raw_results(file: Path, metadata: dict, anchors: dict[int, int], abstract: tuple, compiled: tuple, baseline: tuple) -> None:
@@ -151,8 +151,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-qubits", type=int, default=None, help="skip circuits with more qubits (default: no limit)")
     parser.add_argument("--max-compile-time", type=float, default=600.0, help="time limit per compilation in seconds (default: 600)")
     parser.add_argument("--clean", action="store_true",
-                        help="delete all files in the raw result directories of the run platforms before running, and all previous "
-                             "plot CSVs before visualizing (without it, only the previous plot PNGs are deleted)")
+                        help="delete all files in the raw result directories of the run platforms before running")
     parser.add_argument("--append", action="store_true",
                         help="skip circuit/config combinations whose raw result file already exists")
     parser.add_argument("--only-visual", action="store_true",
