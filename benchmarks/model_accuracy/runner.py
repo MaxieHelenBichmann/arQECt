@@ -9,7 +9,8 @@ from pathlib import Path
 import stim
 import yaml
 
-from benchmarks.model_accuracy.compilation import run_ti_compiler, run_na_compiler, run_sc_compiler, run_ti_abstraction, run_na_abstraction, run_sc_abstraction
+from benchmarks.model_accuracy.compilation import (run_ti_compiler, run_na_compiler, run_sc_compiler, run_ti_abstraction, run_na_abstraction,
+                                                   run_sc_abstraction, run_ti_baseline, run_na_baseline, run_sc_baseline)
 from benchmarks.model_accuracy.architecture_preparation import prepare_ti_hardware, prepare_na_hardware, prepare_sc_hardware
 from benchmarks.model_accuracy.visualization import visualize
 
@@ -21,7 +22,7 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
         max_qubits: int | None = None, max_compile_time: float = 600.0, visualize_true: bool = True, clean: bool = False,
         append: bool = False, only_visual: bool = False) -> None:
     if only_visual:
-        visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits)
+        visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits, clean)
         return
 
     # empty the raw result directories of the platforms that are run (so only results of this run remain)
@@ -64,6 +65,8 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
                 
                 abstract_hardware, concrete_hardware = prepare_ti_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
 
+                print(f"[{config["platform"]}] Running baseline execution of {circuit_name} on ({config["name"]})...")
+                baseline_hardware_events, baseline_details = run_ti_baseline(circuit)
                 print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
                 abstract_hardware_events, abstraction_details = run_ti_abstraction(hardware=abstract_hardware, circuit=circuit)
                 print(f"[{config["platform"]}] Running compilation of        {circuit_name} on ({config["name"]})...")
@@ -78,7 +81,8 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
                 save_raw_results(_RESULTS_DIR / "ti" / "raw" / f"{config['name']}__{circuit_name}.csv", metadata,
                                  anchors={qubit: anchors[qubit] for qubit in range(circuit.num_qubits)},
                                  abstract=(abstract_hardware_events, abstraction_details),
-                                 compiled=(concrete_hardware_events, compiler_details))
+                                 compiled=(concrete_hardware_events, compiler_details),
+                                 baseline=(baseline_hardware_events, baseline_details))
 
         elif config["platform"] == "NA":
             for circuit_name, circuit in circuits.items():
@@ -92,6 +96,8 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
 
                 abstract_hardware, concrete_hardware = prepare_na_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
 
+                print(f"[{config["platform"]}] Running baseline execution of {circuit_name} on ({config["name"]})...")
+                baseline_hardware_events, baseline_details = run_na_baseline(circuit)
                 print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
                 abstract_hardware_events, abstraction_details = run_na_abstraction(hardware=abstract_hardware, circuit=circuit)
                 print(f"[{config["platform"]}] Running compilation of        {circuit_name} on ({config["name"]})...")
@@ -106,7 +112,8 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
                 save_raw_results(_RESULTS_DIR / "na" / "raw" / f"{config['name']}__{circuit_name}.csv", metadata,
                                  anchors={qubit: anchors[qubit] for qubit in range(circuit.num_qubits)},
                                  abstract=(abstract_hardware_events, abstraction_details),
-                                 compiled=(concrete_hardware_events, compiler_details))
+                                 compiled=(concrete_hardware_events, compiler_details),
+                                 baseline=(baseline_hardware_events, baseline_details))
         elif config["platform"] == "SC":
             for circuit_name, circuit in circuits.items():
                 if append and (_RESULTS_DIR / "sc" / "raw" / f"{config['name']}__{circuit_name}.csv").exists():
@@ -119,6 +126,8 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
                 
                 abstract_hardware, concrete_hardware = prepare_sc_hardware(parameters=config["architecture"], num_qubits=circuit.num_qubits)
 
+                print(f"[{config["platform"]}] Running baseline execution of {circuit_name} on ({config["name"]})...")
+                baseline_hardware_events, baseline_details = run_sc_baseline(circuit)
                 print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
                 abstract_hardware_events, abstraction_details = run_sc_abstraction(hardware=abstract_hardware, circuit=circuit)
                 print(f"[{config["platform"]}] Running compilation of        {circuit_name} on ({config["name"]})...")
@@ -133,17 +142,19 @@ def run(platforms: list[str] | None = None, circuit_pattern: str = "*", config_p
                 save_raw_results(_RESULTS_DIR / "sc" / "raw" / f"{config['name']}__{circuit_name}.csv", metadata,
                                  anchors={qubit: anchors[qubit] for qubit in range(circuit.num_qubits)},
                                  abstract=(abstract_hardware_events, abstraction_details),
-                                 compiled=(concrete_hardware_events, compiler_details))
+                                 compiled=(concrete_hardware_events, compiler_details),
+                                 baseline=(baseline_hardware_events, baseline_details))
         else:
             print(f"Unsupported platform: {config["platform"]}")
 
     # evaluate the results
     if visualize_true:
-        visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits)
+        visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits, clean)
 
 
-def save_raw_results(file: Path, metadata: dict, anchors: dict[int, int], abstract: tuple, compiled: tuple) -> None:
+def save_raw_results(file: Path, metadata: dict, anchors: dict[int, int], abstract: tuple, compiled: tuple, baseline: tuple) -> None:
     """Store one comparison (one hardware config, one circuit) as CSV: the metadata, then source, metric, qubit, anchor, count, value.
+    Sources: the circuit, the abstract model, the compiler and the naive per-gate model ("per_gate").
 
     - circuit anchors: one row per qubit (source "circuit"), with its number of anchor operations in `value`
     - event lists (e.g. interaction_zone_entry): one row per event, in list (= chronological) order, count 1
@@ -156,7 +167,7 @@ def save_raw_results(file: Path, metadata: dict, anchors: dict[int, int], abstra
         writer.writerow([*metadata, "source", "metric", "qubit", "anchor", "count", "value"])
         for qubit, num_anchors in anchors.items():
             writer.writerow([*metadata.values(), "circuit", "anchors", qubit, "", "", num_anchors])
-        for source, (events, details) in {"abstract": abstract, "compiled": compiled}.items():
+        for source, (events, details) in {"abstract": abstract, "compiled": compiled, "per_gate": baseline}.items():
             for metric, locations in vars(events).items():
                 for location in locations:  # a location, or a pair of locations (SC virtual_swap: one row per swapped qubit)
                     for qubit, anchor in (location if isinstance(location[0], tuple) else [location]):
@@ -181,7 +192,8 @@ if __name__ == "__main__":
     parser.add_argument("--max-compile-time", type=float, default=600.0, help="time limit per compilation in seconds (default: 600)")
     parser.add_argument("--no-visualize", action="store_true", help="only write the raw results, no plots")
     parser.add_argument("--clean", action="store_true",
-                        help="delete all files in the raw result directories of the run platforms before running")
+                        help="delete all files in the raw result directories of the run platforms before running, and all previous "
+                             "plot CSVs before visualizing (without it, only the previous plot PNGs are deleted)")
     parser.add_argument("--append", action="store_true",
                         help="skip circuit/config combinations whose raw result file already exists")
     parser.add_argument("--only-visual", action="store_true",

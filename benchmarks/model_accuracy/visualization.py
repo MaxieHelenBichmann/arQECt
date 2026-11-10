@@ -8,10 +8,15 @@ And "well" is defined as resulting in a suitable (either similar (A) or having a
 aggregated over the whole circuit (important for structural cost computation), as well as having a suitable distribution of hardware events
 throughout the circuit (important for noise injection).
 
+As a comparison, the aggregated plots also show a naive per-gate model (another, not hardware-aware abstraction): the qubits of every
+relevant gate enter the relevant zone before and leave it after the gate (TI: any gate, NA: 2-qubit gates and measurements),
+SC: a virtual swap before and after every 2-qubit gate.
+
 All data comes from the raw result files written by the runner (one file per hardware config and circuit).
 """
 
 import csv
+import math
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -21,17 +26,21 @@ import matplotlib
 matplotlib.use("Agg")  # render to files only
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.ticker import MaxNLocator
 from scipy.stats import pearsonr, spearmanr, theilslopes
 
 # colors: surface, text, grid / axes, data series, fit line, reference (optimal outcome) line
 SURFACE, TEXT, TEXT_SECONDARY, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#898781"
 GRID, BASELINE, SERIES, FIT, REFERENCE = "#e1e0d9", "#c3c2b7", "#2a78d6", "#0d366b", "#e34948"
+PER_GATE = "#2f9a5e"  # naive per-gate model (comparison)
+RING_SIZE, RING_WIDTH = 40, 1.4  # per-gate model marker: area (pt²) and ring line width (pt)
 # blue ramp for the qubit number of a circuit, with a fixed range so the same color means the same qubit number in every plot
 QUBIT_CMAP = LinearSegmentedColormap.from_list("qubits", ["#86b6ef", "#6da7ec", "#5598e7", "#3987e5", "#2a78d6",
                                                           "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b"])
-QUBIT_MIN, QUBIT_MAX = 4, 20
+QUBIT_MIN, QUBIT_MAX = 4, 50
+QUBIT_TICKS = (4, 10, 20, 30, 40, 50)
 DPI = 200
 
 # TI raw result metrics
@@ -50,12 +59,14 @@ SC_SWAPS = "virtual_swap"  # abstract and compiled event
 SC_COMPILED_SWAPS = "swaps"  # compiled detail, the same SWAPs as the compiled virtual_swap events
 
 
-def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = None) -> None:
+def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = None, clean: bool = False) -> None:
+    """Write the plots (and their CSV tables) of the given platforms; removes the previous plots first, with `clean` also the previous CSVs."""
+    old_outputs = "*" if clean else "*.png"
     if "TI" in platform:
         out_dir = results_dir / "ti" / "plots"
         out_dir.mkdir(parents=True, exist_ok=True)
          
-        for old_file in out_dir.glob("ti_*"):  # remove previous TI outputs (also of configs that no longer have results)
+        for old_file in out_dir.glob(f"ti_{old_outputs}"):  # remove previous TI outputs (also of configs that no longer have results)
             old_file.unlink()
         runs = defaultdict(list)  # config -> the raw rows of each circuit
         for file in sorted((results_dir / "ti" / "raw").glob("*.csv")):
@@ -71,7 +82,7 @@ def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = N
         out_dir = results_dir / "na" / "plots"
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        for old_file in out_dir.glob("na_*"):  # remove previous NA outputs (also of configs that no longer have results)
+        for old_file in out_dir.glob(f"na_{old_outputs}"):  # remove previous NA outputs (also of configs that no longer have results)
             old_file.unlink()
         runs = defaultdict(list)  # config -> the raw rows of each circuit
         for file in sorted((results_dir / "na" / "raw").glob("*.csv")):
@@ -87,7 +98,7 @@ def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = N
         out_dir = results_dir / "sc" / "plots"
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        for old_file in out_dir.glob("sc_*"):  # remove previous SC outputs (also of configs that no longer have results)
+        for old_file in out_dir.glob(f"sc_{old_outputs}"):  # remove previous SC outputs (also of configs that no longer have results)
             old_file.unlink()
         runs = defaultdict(list)  # config -> the raw rows of each circuit
         for file in sorted((results_dir / "sc" / "raw").glob("*.csv")):
@@ -148,7 +159,7 @@ def plot_event_amount(qubit_shares: list[tuple[float, float, int]], title: str, 
     order = np.argsort(-qubits)  # smaller circuits (larger shares, fewer points) drawn on top
     points = ax.scatter(plotted[order, 0], plotted[order, 1], s=26, c=qubits[order], cmap=QUBIT_CMAP,
                         vmin=QUBIT_MIN, vmax=QUBIT_MAX, alpha=0.8, edgecolors=SURFACE, linewidths=0.6, zorder=3)
-    colorbar = fig.colorbar(points, ax=ax, ticks=range(QUBIT_MIN, QUBIT_MAX + 1, 4), fraction=0.05, pad=0.03)
+    colorbar = fig.colorbar(points, ax=ax, ticks=QUBIT_TICKS, fraction=0.05, pad=0.03)
     colorbar.set_label("qubits in circuit", color=TEXT_SECONDARY, fontsize=10)
     colorbar.outline.set_visible(False)
     colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
@@ -168,6 +179,35 @@ def plot_event_amount(qubit_shares: list[tuple[float, float, int]], title: str, 
           notes=(above_note, "one data point = one qubit, shares within its circuit (log scale)"))
     fig.savefig(file, dpi=DPI, facecolor=SURFACE)
     plt.close(fig)
+
+
+def circuit_zorder(i: int) -> float:
+    """Drawing order of the i-th circuit's dot in the aggregated plots: outline at +0, connecting line at +1e-5, fill at +2e-5."""
+    return 4 + i * 3e-5
+
+
+def connect_per_gate(fig, ax, xs: list[float], xs_per_gate: list[float], ys: list[float]) -> None:
+    """Connect the two points of each circuit with a horizontal line: from the abstract model's dot (under its fill, over its
+    outline) to the outer edge of the per-gate model's ring. Needs the final layout, as the ring radius is converted from points."""
+    x_start, x_end = ax.get_xlim()
+    points_to_data = (x_end - x_start) / (ax.get_window_extent().width * 72 / fig.dpi)
+    ring_radius = (math.sqrt(RING_SIZE) / 2 + RING_WIDTH / 2) * points_to_data
+    for i, (x, x_per_gate, y) in enumerate(zip(xs, xs_per_gate, ys)):
+        if abs(x_per_gate - x) > ring_radius:
+            ax.plot([x, x_per_gate - math.copysign(ring_radius, x_per_gate - x)], [y, y], color=BASELINE, linewidth=0.8,
+                    solid_capstyle="butt", zorder=circuit_zorder(i) + 1e-5)
+
+
+def agreement(predicted: list[float], actual: list[float], same_quantity: bool) -> str:
+    """Legend text for how well a model's per-circuit counts agree with the compiled ones: Pearson r, Spearman ρ and, if both
+    are the same quantity, the median relative error (|predicted - compiled| / compiled, circuits with no compiled events excluded)."""
+    text = []
+    if len(predicted) >= 3 and len(set(predicted)) >= 2 and len(set(actual)) >= 2:
+        text.append(f"r = {pearsonr(predicted, actual).statistic:.2f}, ρ = {spearmanr(predicted, actual).statistic:.2f}")
+    errors = [abs(p - a) / a for p, a in zip(predicted, actual) if a]
+    if same_quantity and errors:
+        text.append(f"median rel. error {np.median(errors):.0%}")
+    return ", ".join(text) or "no variation"
 
 
 def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix: str) -> None:
@@ -201,6 +241,7 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
         scores.append({
             "circuit": rows[0]["circuit"],
             "num_qubits": int(rows[0]["num_qubits"]),
+            "anchors": sum(int(row["value"]) for row in rows if row["metric"] == "anchors"),  # circuit size
             "abstract_iz_entries": counts[("abstract", "interaction_zone_entry")],
             "abstract_iz_evictions": counts[("abstract", "interaction_zone_eviction")],
             "abstract_iz_changes": sum(counts[("abstract", metric)] for metric in TI_IZ_CHANGES),
@@ -208,6 +249,9 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
             "compiled_iz_evictions": counts[("compiled", "interaction_zone_eviction")],
             "compiled_iz_changes": sum(counts[("compiled", metric)] for metric in TI_IZ_CHANGES),
             "compiled_ion_moves": sum(counts[("compiled", metric)] for metric in TI_ION_MOVES),
+            "per_gate_iz_entries": counts[("per_gate", "interaction_zone_entry")],
+            "per_gate_iz_evictions": counts[("per_gate", "interaction_zone_eviction")],
+            "per_gate_iz_changes": sum(counts[("per_gate", metric)] for metric in TI_IZ_CHANGES),
             "abstract_wall_clock_s": wall_clock_s["abstract"],
             "compiled_wall_clock_s": wall_clock_s["compiled"],
         })
@@ -216,26 +260,27 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
     mean_compile_s = np.mean([c["compiled_wall_clock_s"] for c in scores])
     mean_abstract_s = np.mean([c["abstract_wall_clock_s"] for c in scores])
 
-    # 2) the plots: (file name, title, x column, y column, x label, y label, same quantity on both axes)
+    # 2) the plots: (file name, title, x column, per-gate x column, y column, x label, y label, same quantity on both axes)
     plots = [
-        ("iz_entries", "IZ entries", "abstract_iz_entries", "compiled_iz_entries",
+        ("iz_entries", "IZ entries", "abstract_iz_entries", "per_gate_iz_entries", "compiled_iz_entries",
          "abstract IZ entries", "compiled IZ entries", True),
-        ("iz_evictions", "IZ evictions", "abstract_iz_evictions", "compiled_iz_evictions",
+        ("iz_evictions", "IZ evictions", "abstract_iz_evictions", "per_gate_iz_evictions", "compiled_iz_evictions",
          "abstract IZ evictions", "compiled IZ evictions", True),
-        ("iz_changes", "IZ changes (entries + evictions)", "abstract_iz_changes", "compiled_iz_changes",
+        ("iz_changes", "IZ changes (entries + evictions)", "abstract_iz_changes", "per_gate_iz_changes", "compiled_iz_changes",
          "abstract IZ changes", "compiled IZ changes", True),
-        ("iz_changes_vs_ion_moves", "IZ changes vs ion moves", "abstract_iz_changes", "compiled_ion_moves",
+        ("iz_changes_vs_ion_moves", "IZ changes vs ion moves", "abstract_iz_changes", "per_gate_iz_changes", "compiled_ion_moves",
          "abstract IZ changes", "compiled shuttles + swaps", False),
     ]
-    for name, title, x_key, y_key, x_label, y_label, same_quantity in plots:
+    for name, title, x_key, per_gate_key, y_key, x_label, y_label, same_quantity in plots:
         xs = [c[x_key] for c in scores]
+        xs_per_gate = [c[per_gate_key] for c in scores]
         ys = [c[y_key] for c in scores]
         fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # counts: integer ticks only
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
         # axis ranges, and the y = x line if both axes show the same quantity
-        x_end = max([*xs, 1]) * 1.08
+        x_end = max([*xs, *xs_per_gate, 1]) * 1.08
         y_end = max([*ys, 1]) * 1.08
         if same_quantity:
             x_end = y_end = max(x_end, y_end)
@@ -244,29 +289,34 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
         ax.set_ylim(0, y_end)
 
         # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²)
-        subtitle = f"number of circuits = {len(xs)}"
+        subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
         if len(set(xs)) >= 2 and len(set(ys)) >= 2:
             slope, intercept, slope_low, slope_high = theilslopes(ys, xs)
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, linewidth=2, zorder=2,
+            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=2, zorder=2,
                     label=f"robust fit (Theil-Sen), slope 95% CI {slope_low:.2f}–{slope_high:.2f}")
             slope, intercept = np.polyfit(xs, ys, 1)
             r_squared = np.corrcoef(xs, ys)[0, 1] ** 2
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, linewidth=1.2,
+            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=1.2,
                     linestyle="--", zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
-            if len(xs) >= 3:
-                subtitle += f"   Pearson r = {pearsonr(xs, ys).statistic:.2f}"
-                subtitle += f"   Spearman ρ = {spearmanr(xs, ys).statistic:.2f}"
 
-        # the circuits, colored by qubit number
-        points = ax.scatter(xs, ys, s=56, c=qubits, cmap=QUBIT_CMAP, vmin=QUBIT_MIN, vmax=QUBIT_MAX,
-                            edgecolors=SURFACE, linewidths=1.5, zorder=3)
-        colorbar = fig.colorbar(points, ax=ax, ticks=range(QUBIT_MIN, QUBIT_MAX + 1, 4), fraction=0.05, pad=0.03)
+        # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
+        # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
+        ax.scatter(xs_per_gate, ys, s=RING_SIZE, facecolors="none", edgecolors=PER_GATE, linewidths=RING_WIDTH, zorder=3)
+        points = ScalarMappable(Normalize(QUBIT_MIN, QUBIT_MAX), QUBIT_CMAP)
+        for i, (x, y, qubit) in enumerate(zip(xs, ys, qubits)):
+            ax.scatter([x], [y], s=56, color=SURFACE, edgecolors=SURFACE, linewidths=1.6, zorder=circuit_zorder(i))
+            ax.scatter([x], [y], s=56, color=points.to_rgba(qubit), linewidths=0, zorder=circuit_zorder(i) + 2e-5)
+        ax.plot([], [], marker="o", markersize=7, linestyle="none", color=SERIES,
+                label=f"abstract model ({agreement(xs, ys, same_quantity)})")
+        ax.plot([], [], marker="o", markersize=6, linestyle="none", markerfacecolor="none", markeredgecolor=PER_GATE,
+                markeredgewidth=1.4, label=f"per-gate model ({agreement(xs_per_gate, ys, same_quantity)})")
+        colorbar = fig.colorbar(points, ax=ax, ticks=QUBIT_TICKS, fraction=0.05, pad=0.03)
         colorbar.set_label("qubits in circuit", color=TEXT_SECONDARY, fontsize=10)
         colorbar.outline.set_visible(False)
         colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
 
-        style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label,
-              notes=(f"avg. run time: compilation {mean_compile_s:.3g} s vs abstract execution {mean_abstract_s:.3g} s",))
+        style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label)
+        connect_per_gate(fig, ax, xs, xs_per_gate, ys)  # after the layout is fixed
         fig.savefig(f"{file_prefix}__{name}.png", dpi=DPI, facecolor=SURFACE)
         plt.close(fig)
 
@@ -349,7 +399,7 @@ def visualize_ti_distribution(config: str, circuits: list[list[dict]], file_pref
         for row in rows:
             if row["source"] == "circuit" and row["metric"] == "anchors":
                 anchors[int(row["qubit"])] = int(row["value"])
-            elif row["count"]:
+            elif row["count"] and row["source"] != "per_gate":  # the per-gate model is only compared in the aggregated plots
                 slot = (int(row["qubit"]), int(row["anchor"]))
                 if row["metric"] in TI_IZ_CHANGES:
                     iz_changes[row["source"]][slot] += int(row["count"])
@@ -542,6 +592,7 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
         scores.append({
             "circuit": rows[0]["circuit"],
             "num_qubits": int(rows[0]["num_qubits"]),
+            "anchors": sum(int(row["value"]) for row in rows if row["metric"] == "anchors"),  # circuit size
             "abstract_storage_entanglement": int(counts[("abstract", "storage_entanglement")]),
             "abstract_inter_entanglement": int(counts[("abstract", "inter_entanglement")]),
             "abstract_zone_changes": int(sum(counts[("abstract", metric)] for metric in NA_COMPARABLE_ZONE_CHANGES)),
@@ -550,6 +601,10 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
             "compiled_inter_entanglement": int(counts[("compiled", "inter_entanglement")]),
             "compiled_zone_changes": int(sum(counts[("compiled", metric)] for metric in NA_COMPARABLE_ZONE_CHANGES)),
             "compiled_atom_moves": int(counts[("compiled", NA_ATOM_MOVES)]),
+            "per_gate_storage_entanglement": int(counts[("per_gate", "storage_entanglement")]),
+            "per_gate_inter_entanglement": int(counts[("per_gate", "inter_entanglement")]),
+            "per_gate_zone_changes": int(sum(counts[("per_gate", metric)] for metric in NA_COMPARABLE_ZONE_CHANGES)),
+            "per_gate_all_zone_changes": int(sum(counts[("per_gate", metric)] for metric in NA_ZONE_CHANGES)),
             "abstract_wall_clock_s": wall_clock_s["abstract"],
             "compiled_wall_clock_s": wall_clock_s["compiled"],
         })
@@ -558,26 +613,27 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
     mean_compile_s = np.mean([c["compiled_wall_clock_s"] for c in scores])
     mean_abstract_s = np.mean([c["abstract_wall_clock_s"] for c in scores])
 
-    # 2) the plots: (file name, title, x column, y column, x label, y label, same quantity on both axes)
+    # 2) the plots: (file name, title, x column, per-gate x column, y column, x label, y label, same quantity on both axes)
     plots = [
-        ("storage_entanglement", "storage ↔ entanglement zone changes", "abstract_storage_entanglement",
+        ("storage_entanglement", "storage ↔ entanglement zone changes", "abstract_storage_entanglement", "per_gate_storage_entanglement",
          "compiled_storage_entanglement", "abstract storage ↔ EZ changes", "compiled storage ↔ EZ changes", True),
-        ("inter_entanglement", "entanglement site changes", "abstract_inter_entanglement", "compiled_inter_entanglement",
+        ("inter_entanglement", "entanglement site changes", "abstract_inter_entanglement", "per_gate_inter_entanglement", "compiled_inter_entanglement",
          "abstract EZ site changes", "compiled EZ site changes", True),
-        ("zone_changes", "zone changes (storage ↔ EZ + EZ site)", "abstract_zone_changes", "compiled_zone_changes",
+        ("zone_changes", "zone changes (storage ↔ EZ + EZ site)", "abstract_zone_changes", "per_gate_zone_changes", "compiled_zone_changes",
          "abstract zone changes", "compiled zone changes", True),
-        ("zone_changes_vs_atom_moves", "zone changes vs atom moves", "abstract_all_zone_changes", "compiled_atom_moves",
+        ("zone_changes_vs_atom_moves", "zone changes vs atom moves", "abstract_all_zone_changes", "per_gate_all_zone_changes", "compiled_atom_moves",
          "abstract zone changes (incl. readout)", "compiled atom transports", False),
     ]
-    for name, title, x_key, y_key, x_label, y_label, same_quantity in plots:
+    for name, title, x_key, per_gate_key, y_key, x_label, y_label, same_quantity in plots:
         xs = [c[x_key] for c in scores]
+        xs_per_gate = [c[per_gate_key] for c in scores]
         ys = [c[y_key] for c in scores]
         fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # counts: integer ticks only
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
         # axis ranges, and the y = x line if both axes show the same quantity
-        x_end = max([*xs, 1]) * 1.08
+        x_end = max([*xs, *xs_per_gate, 1]) * 1.08
         y_end = max([*ys, 1]) * 1.08
         if same_quantity:
             x_end = y_end = max(x_end, y_end)
@@ -586,29 +642,34 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
         ax.set_ylim(0, y_end)
 
         # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²)
-        subtitle = f"number of circuits = {len(xs)}"
+        subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
         if len(set(xs)) >= 2 and len(set(ys)) >= 2:
             slope, intercept, slope_low, slope_high = theilslopes(ys, xs)
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, linewidth=2, zorder=2,
+            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=2, zorder=2,
                     label=f"robust fit (Theil-Sen), slope 95% CI {slope_low:.2f}–{slope_high:.2f}")
             slope, intercept = np.polyfit(xs, ys, 1)
             r_squared = np.corrcoef(xs, ys)[0, 1] ** 2
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, linewidth=1.2,
+            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=1.2,
                     linestyle="--", zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
-            if len(xs) >= 3:
-                subtitle += f"   Pearson r = {pearsonr(xs, ys).statistic:.2f}"
-                subtitle += f"   Spearman ρ = {spearmanr(xs, ys).statistic:.2f}"
 
-        # the circuits, colored by qubit number
-        points = ax.scatter(xs, ys, s=56, c=qubits, cmap=QUBIT_CMAP, vmin=QUBIT_MIN, vmax=QUBIT_MAX,
-                            edgecolors=SURFACE, linewidths=1.5, zorder=3)
-        colorbar = fig.colorbar(points, ax=ax, ticks=range(QUBIT_MIN, QUBIT_MAX + 1, 4), fraction=0.05, pad=0.03)
+        # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
+        # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
+        ax.scatter(xs_per_gate, ys, s=RING_SIZE, facecolors="none", edgecolors=PER_GATE, linewidths=RING_WIDTH, zorder=3)
+        points = ScalarMappable(Normalize(QUBIT_MIN, QUBIT_MAX), QUBIT_CMAP)
+        for i, (x, y, qubit) in enumerate(zip(xs, ys, qubits)):
+            ax.scatter([x], [y], s=56, color=SURFACE, edgecolors=SURFACE, linewidths=1.6, zorder=circuit_zorder(i))
+            ax.scatter([x], [y], s=56, color=points.to_rgba(qubit), linewidths=0, zorder=circuit_zorder(i) + 2e-5)
+        ax.plot([], [], marker="o", markersize=7, linestyle="none", color=SERIES,
+                label=f"abstract model ({agreement(xs, ys, same_quantity)})")
+        ax.plot([], [], marker="o", markersize=6, linestyle="none", markerfacecolor="none", markeredgecolor=PER_GATE,
+                markeredgewidth=1.4, label=f"per-gate model ({agreement(xs_per_gate, ys, same_quantity)})")
+        colorbar = fig.colorbar(points, ax=ax, ticks=QUBIT_TICKS, fraction=0.05, pad=0.03)
         colorbar.set_label("qubits in circuit", color=TEXT_SECONDARY, fontsize=10)
         colorbar.outline.set_visible(False)
         colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
 
-        style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label,
-              notes=(f"avg. run time: compilation {mean_compile_s:.3g} s vs abstract execution {mean_abstract_s:.3g} s",))
+        style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label)
+        connect_per_gate(fig, ax, xs, xs_per_gate, ys)  # after the layout is fixed
         fig.savefig(f"{file_prefix}__{name}.png", dpi=DPI, facecolor=SURFACE)
         plt.close(fig)
 
@@ -661,7 +722,7 @@ def visualize_na_distribution(config: str, circuits: list[list[dict]], file_pref
         for row in rows:
             if row["source"] == "circuit" and row["metric"] == "anchors":
                 anchors[int(row["qubit"])] = int(row["value"])
-            elif row["count"]:
+            elif row["count"] and row["source"] != "per_gate":  # the per-gate model is only compared in the aggregated plots
                 slot = (int(row["qubit"]), int(row["anchor"]))
                 if row["metric"] in NA_COMPARABLE_ZONE_CHANGES:
                     zone_changes[row["source"]][slot] += int(row["count"])
@@ -848,8 +909,10 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
         scores.append({
             "circuit": rows[0]["circuit"],
             "num_qubits": int(rows[0]["num_qubits"]),
+            "anchors": sum(int(row["value"]) for row in rows if row["metric"] == "anchors"),  # circuit size
             "abstract_swaps": counts[("abstract", SC_SWAPS)] // 2,
             "compiled_swaps": counts[("compiled", SC_SWAPS)] // 2,
+            "per_gate_swaps": counts[("per_gate", SC_SWAPS)] // 2,
             "abstract_wall_clock_s": wall_clock_s["abstract"],
             "compiled_wall_clock_s": wall_clock_s["compiled"],
         })
@@ -858,20 +921,21 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
     mean_compile_s = np.mean([c["compiled_wall_clock_s"] for c in scores])
     mean_abstract_s = np.mean([c["abstract_wall_clock_s"] for c in scores])
 
-    # 2) the plots: (file name, title, x column, y column, x label, y label, same quantity on both axes)
+    # 2) the plots: (file name, title, x column, per-gate x column, y column, x label, y label, same quantity on both axes)
     plots = [
-        ("swaps", "virtual swaps", "abstract_swaps", "compiled_swaps",
+        ("swaps", "virtual swaps", "abstract_swaps", "per_gate_swaps", "compiled_swaps",
          "abstract virtual swaps", "compiled swaps", False),
     ]
-    for name, title, x_key, y_key, x_label, y_label, same_quantity in plots:
+    for name, title, x_key, per_gate_key, y_key, x_label, y_label, same_quantity in plots:
         xs = [c[x_key] for c in scores]
+        xs_per_gate = [c[per_gate_key] for c in scores]
         ys = [c[y_key] for c in scores]
         fig, ax = plt.subplots(figsize=(6, 5.5), facecolor=SURFACE)
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # counts: integer ticks only
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
         # axis ranges, and the y = x line if both axes show the same quantity
-        x_end = max([*xs, 1]) * 1.08
+        x_end = max([*xs, *xs_per_gate, 1]) * 1.08
         y_end = max([*ys, 1]) * 1.08
         if same_quantity:
             x_end = y_end = max(x_end, y_end)
@@ -880,29 +944,34 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
         ax.set_ylim(0, y_end)
 
         # linear fits: robust Theil-Sen (with 95% CI of the slope) and least squares (with R²)
-        subtitle = f"number of circuits = {len(xs)}"
+        subtitle = f"number of circuits = {len(xs)}   avg. run time: compiler {mean_compile_s:.3g} s, abstract {mean_abstract_s:.3g} s"
         if len(set(xs)) >= 2 and len(set(ys)) >= 2:
             slope, intercept, slope_low, slope_high = theilslopes(ys, xs)
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, linewidth=2, zorder=2,
+            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=2, zorder=2,
                     label=f"robust fit (Theil-Sen), slope 95% CI {slope_low:.2f}–{slope_high:.2f}")
             slope, intercept = np.polyfit(xs, ys, 1)
             r_squared = np.corrcoef(xs, ys)[0, 1] ** 2
-            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, linewidth=1.2,
+            ax.plot([0, x_end], [intercept, slope * x_end + intercept], color=FIT, alpha=0.45, linewidth=1.2,
                     linestyle="--", zorder=2, label=f"least-squares fit, R² = {r_squared:.2f}")
-            if len(xs) >= 3:
-                subtitle += f"   Pearson r = {pearsonr(xs, ys).statistic:.2f}"
-                subtitle += f"   Spearman ρ = {spearmanr(xs, ys).statistic:.2f}"
 
-        # the circuits, colored by qubit number
-        points = ax.scatter(xs, ys, s=56, c=qubits, cmap=QUBIT_CMAP, vmin=QUBIT_MIN, vmax=QUBIT_MAX,
-                            edgecolors=SURFACE, linewidths=1.5, zorder=3)
-        colorbar = fig.colorbar(points, ax=ax, ticks=range(QUBIT_MIN, QUBIT_MAX + 1, 4), fraction=0.05, pad=0.03)
+        # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
+        # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
+        ax.scatter(xs_per_gate, ys, s=RING_SIZE, facecolors="none", edgecolors=PER_GATE, linewidths=RING_WIDTH, zorder=3)
+        points = ScalarMappable(Normalize(QUBIT_MIN, QUBIT_MAX), QUBIT_CMAP)
+        for i, (x, y, qubit) in enumerate(zip(xs, ys, qubits)):
+            ax.scatter([x], [y], s=56, color=SURFACE, edgecolors=SURFACE, linewidths=1.6, zorder=circuit_zorder(i))
+            ax.scatter([x], [y], s=56, color=points.to_rgba(qubit), linewidths=0, zorder=circuit_zorder(i) + 2e-5)
+        ax.plot([], [], marker="o", markersize=7, linestyle="none", color=SERIES,
+                label=f"abstract model ({agreement(xs, ys, same_quantity)})")
+        ax.plot([], [], marker="o", markersize=6, linestyle="none", markerfacecolor="none", markeredgecolor=PER_GATE,
+                markeredgewidth=1.4, label=f"per-gate model ({agreement(xs_per_gate, ys, same_quantity)})")
+        colorbar = fig.colorbar(points, ax=ax, ticks=QUBIT_TICKS, fraction=0.05, pad=0.03)
         colorbar.set_label("qubits in circuit", color=TEXT_SECONDARY, fontsize=10)
         colorbar.outline.set_visible(False)
         colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
 
-        style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label,
-              notes=(f"avg. run time: compilation {mean_compile_s:.3g} s vs abstract execution {mean_abstract_s:.3g} s",))
+        style(fig, ax, f"{config}: {title}", subtitle, x_label, y_label)
+        connect_per_gate(fig, ax, xs, xs_per_gate, ys)  # after the layout is fixed
         fig.savefig(f"{file_prefix}__{name}.png", dpi=DPI, facecolor=SURFACE)
         plt.close(fig)
 
@@ -943,7 +1012,7 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
         for row in rows:
             if row["source"] == "circuit" and row["metric"] == "anchors":
                 anchors[int(row["qubit"])] = int(row["value"])
-            elif row["count"]:
+            elif row["count"] and row["source"] != "per_gate":  # the per-gate model is only compared in the aggregated plots
                 slot = (int(row["qubit"]), int(row["anchor"]))
                 if row["metric"] == SC_SWAPS:
                     swaps[row["source"]][slot] += int(row["count"])
