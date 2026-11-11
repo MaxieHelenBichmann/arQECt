@@ -12,6 +12,10 @@ from src.analysis.efficiency.dag import DependencyDAGAnalyzer
 from src.analysis.efficiency.wip import InteractionGraphAnalyzer
 from src.analysis.efficiency.qtl import QubitTimelinesAnalyzer
 from src.analysis.efficiency.gd import GateDistributionAnalyzer
+from src.analysis.quality.encoder import EncoderCircuitAnalyzer
+from src.analysis.quality.state_prep import StatePreparationCircuitAnalyzer
+from src.analysis.quality.syndrome_extract import SyndromeExtractionAnalyzer
+
 
 if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
@@ -41,7 +45,13 @@ class CircuitAnalyzer:
                 QubitTimelinesAnalyzer(qtl, self.hardware) 
             ]
 
-            quality_analyzer = [] # dependent on function
+            match function:
+                case "StatePrep": 
+                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware) ]
+                case "Encoding": 
+                    quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware) ]
+                case "Syndrome": 
+                    quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware) ]
                   
             for analyzer in efficiency_analyzer + quality_analyzer:
                 self.metrics.update(analyzer.analyze())
