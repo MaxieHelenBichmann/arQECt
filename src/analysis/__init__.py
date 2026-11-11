@@ -3,7 +3,6 @@
 from typing import Literal, Protocol
 
 from src.analysis.processor import GateProcessor, CircuitProcessor
-from src.analysis.analyzer import CircuitAnalyzer
 
 CircuitFunction = Literal["StatePrep", "Encoding", "Syndrome"]
 

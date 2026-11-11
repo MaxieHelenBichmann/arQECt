@@ -5,7 +5,8 @@ from __future__ import annotations
 import stim
 
 from typing import TYPE_CHECKING
-from src.analysis import CircuitFunction, CircuitAnalyzer
+from src.analysis import CircuitFunction
+from src.analysis.analyzer import CircuitAnalyzer
 from src.models.hardware import TrappedIonsModel, SuperconductingQubitsModel, NeutralAtomsModel, HardwareModel
 
 
