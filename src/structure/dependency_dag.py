@@ -16,6 +16,7 @@ from collections import defaultdict
 @dataclass
 class DAGGate:
     qubits: tuple[int, ...]
+    readout: bool = False
     predecessors: set[int] = field(default_factory=set)
     successors: set[int] = field(default_factory=set)
     schedule_interval: tuple[int | None, int | None] = field(default_factory=lambda: (None, None))  # (asap schedule time, alap schedule time)
@@ -39,7 +40,7 @@ class DependencyDAG(GateProcessor):
         asap_time = max([self.dag[p].schedule_interval[0] for p in predecessors]) + 1 if predecessors else 1
         self.depth = max(self.depth, asap_time)
 
-        self.dag[self._index] = DAGGate(qubits=qubits, predecessors=predecessors, schedule_interval=(asap_time, None))
+        self.dag[self._index] = DAGGate(qubits=qubits, readout=gate.produces_measurements, predecessors=predecessors, schedule_interval=(asap_time, None))
         for q in qubits:
             self._last_gate[q] = self._index
         self._index += 1
