@@ -7,11 +7,13 @@ from typing import TYPE_CHECKING
 from src.analysis import MetricExtractor
 
 if TYPE_CHECKING:
+    from src.models.hardware import HardwareModel
     from src.structure.qubit_timelines import QubitTimelines
 
 class QubitTimelinesAnalyzer(MetricExtractor):
-    def __init__(self, qtl: QubitTimelines):
+    def __init__(self, qtl: QubitTimelines,  hardware: HardwareModel):
         self.qtl = qtl
+        self.hw = hardware
 
-    def analyze(self) -> dict:
+    def analyze(self) -> dict[str, object]:
         {}

@@ -16,7 +16,7 @@ Different hardware-architectures can be modeled by varying the available qubit d
     
 import random
 from collections import defaultdict
-from src.analysis import GateProcessor, MetricExtractor, CircuitFunction
+from src.analysis.processor import GateProcessor
 from src.models.noise.noise import ErrorChannel, NoiseModel
 from src.models.common import GateKind, HardwareEventLocation, NoiseTag
 import stim
@@ -104,9 +104,6 @@ class SuperconductingQubitsModel(GateProcessor):
 
     def finalize(self) -> None:
         pass
-
-    def extractor(self, function: CircuitFunction) -> list[MetricExtractor]:
-        return []
     
     def _fits(self, grown: tuple[int, ...]) -> bool:
         sizes = sorted((len(n) + grown.count(q) for q, n in self._neighborhoods.items()), reverse=True)

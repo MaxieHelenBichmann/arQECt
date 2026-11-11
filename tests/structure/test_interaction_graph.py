@@ -2,7 +2,7 @@ import pathlib
 
 import stim
 
-from src.analysis.analyzer import CircuitAnalyzer
+from src.analysis.processor import CircuitProcessor
 from src.structure.interaction_graph import InteractionGraph
 
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
@@ -10,7 +10,7 @@ STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane
 
 def build(circuit: str | stim.Circuit) -> InteractionGraph:
     graph = InteractionGraph()
-    CircuitAnalyzer(graph).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit, "StatePrep")
+    CircuitProcessor(graph).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
     return graph
 
 

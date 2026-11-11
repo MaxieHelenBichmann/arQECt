@@ -1,51 +1,47 @@
-from typing import Literal, Protocol
+"""Analyze a given circuit on a specific hardware platform and configuration."""
+
+from __future__ import annotations
+
 import stim
 
-CircuitFunction = Literal["StatePrep", "Encoding", "Syndrome"]
+from typing import TYPE_CHECKING
+from src.analysis import CircuitFunction, MetricExtractor
+from src.structure import GateDistribution, InteractionGraph, DependencyDAG, QubitTimelines
+from src.analysis.processor import CircuitProcessor
+from src.analysis.efficiency.dag import DependencyDAGAnalyzer
+from src.analysis.efficiency.wip import InteractionGraphAnalyzer
+from src.analysis.efficiency.qtl import QubitTimelinesAnalyzer
+from src.analysis.efficiency.gd import GateDistributionAnalyzer
 
+if TYPE_CHECKING:
+    from src.models.hardware import HardwareModel
 
-class MetricExtractor(Protocol):
-    def analyze(self) -> dict:
-        ...
-
-class GateProcessor(Protocol):
-    def process(self, gate: stim.CircuitInstruction) -> None:
-        ...
-
-    def finalize(self) -> None:
-        ...
-
-    def extractor(self, function: CircuitFunction) -> list[MetricExtractor]:
-        ...
 
 class CircuitAnalyzer:
-    def __init__(self, *processors: GateProcessor):
-        self.processors = processors
-        self.metrics : dict = {}
+        def __init__(self, hardware: HardwareModel):
+            self.hardware = hardware
+            self.metrics = {}
+            
 
-    def run(self, circuit: stim.Circuit, function: CircuitFunction): 
-        """Analyzes a circuit by processing each gate simultaneously with the provided processors and extracting relevant metrics."""
-        # 1.) Process the circuit (execute it abstractly or build a relevant representation)
-        for op in circuit: # only one circuit pass necessary
-            if isinstance(op, stim.CircuitRepeatBlock):
-                raise ValueError("unsupported instruction: REPEAT blocks")
-            if op.name == "QUBIT_COORDS":  # annotation
-                continue
-            gate_data = stim.gate_data(op.name)
-            for group in op.target_groups(): # only 1q gates and 2q gates on plain qubits
-                if not (gate_data.is_single_qubit_gate or gate_data.is_two_qubit_gate) or (
-                    gate_data.is_noisy_gate and not gate_data.produces_measurements
-                ) or not all(target.is_qubit_target for target in group):
-                    raise ValueError(f"unsupported instruction: {op.name} on targets {group}")
-                
-                gate = stim.CircuitInstruction(op.name, group, op.gate_args_copy(), tag=op.tag)
-                for processor in self.processors:
-                    processor.process(gate)
+        def analyze(self, circuit: stim.Circuit, function: CircuitFunction):
+            dag = DependencyDAG()
+            gd = GateDistribution()
+            wig = InteractionGraph()
+            qtl = QubitTimelines()
+            
+            # 1.) Process the circuit (execute it abstractly or build a relevant representation)
+            processor = CircuitProcessor(dag, gd, wig, qtl, self.hardware)
+            processor.run(circuit=circuit)
 
-        for processor in self.processors:
-            processor.finalize()
+            # 2.) Extract the metrics
+            efficiency_analyzer : list[MetricExtractor] = [
+                DependencyDAGAnalyzer(dag, self.hardware),
+                GateDistributionAnalyzer(gd, self.hardware),
+                InteractionGraphAnalyzer(wig, self.hardware),
+                QubitTimelinesAnalyzer(qtl, self.hardware) 
+            ]
 
-        # 2.) Extract the metrics
-        for processor in self.processors:
-            for extractor in processor.extractor(function=function):
-                self.metrics.update(extractor.analyze())
+            quality_analyzer = [] # dependent on function
+                  
+            for analyzer in efficiency_analyzer + quality_analyzer:
+                self.metrics.update(analyzer.analyze())

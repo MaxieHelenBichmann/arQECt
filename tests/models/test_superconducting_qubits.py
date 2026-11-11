@@ -4,7 +4,7 @@ import random
 import pytest
 import stim
 
-from src.analysis.analyzer import CircuitAnalyzer
+from src.analysis.processor import CircuitProcessor
 from src.models.common import GateKind
 from src.models.hardware.superconducting_qubits import SuperconductingQubitsModel
 from src.models.noise.noise import NoiseModel
@@ -41,7 +41,7 @@ def run(
     circuit: str | stim.Circuit, nr_qubits: int, topology: dict[int, int], **noise_kwargs
 ) -> SuperconductingQubitsModel:
     model = make_model(nr_qubits, topology, **noise_kwargs)
-    CircuitAnalyzer(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit, "StatePrep")
+    CircuitProcessor(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
     return model
 
 
@@ -301,10 +301,7 @@ def test_steane_neighborhood_invariants_after_every_gate(topology: dict[int, int
         def finalize(self) -> None:
             pass
 
-        def extractor(self, function) -> list:
-            return []
-
-    CircuitAnalyzer(model, InvariantCheck()).run(STEANE_MEASURED, "StatePrep")
+    CircuitProcessor(model, InvariantCheck()).run(STEANE_MEASURED)
 
     assert violations == []
 

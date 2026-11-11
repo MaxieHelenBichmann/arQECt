@@ -3,5 +3,6 @@
 from src.structure.dependency_dag import DependencyDAG
 from src.structure.interaction_graph import InteractionGraph
 from src.structure.qubit_timelines import QubitTimelines
+from src.structure.gate_distribution import GateDistribution
 
-CircuitRepresentations = DependencyDAG | InteractionGraph | QubitTimelines
+CircuitRepresentations = DependencyDAG | InteractionGraph | QubitTimelines | GateDistribution

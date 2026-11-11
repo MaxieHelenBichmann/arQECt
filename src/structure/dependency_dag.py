@@ -8,7 +8,7 @@ It is a gate-centered representation, where each gate is a node in the graph, an
 
 # TODO: optimize DAG representation, potentially storing in layers
 
-from src.analysis import GateProcessor, DependencyDAGAnalyzer
+from src.analysis.processor import GateProcessor
 import stim
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -48,9 +48,6 @@ class DependencyDAG(GateProcessor):
         for i in sorted(self.dag.keys(), reverse=True):
             alap_time = min([self.dag[s].schedule_interval[1] for s in self.dag[i].successors]) - 1 if self.dag[i].successors else self.depth
             self.dag[i].schedule_interval = (self.dag[i].schedule_interval[0], alap_time)
-
-    def extractor(self, function) -> list[DependencyDAGAnalyzer]:
-        return [DependencyDAGAnalyzer(dag=self)]
 
     def __repr__(self) -> str:
         return f"DependencyDAG(nr_gates={len(self.dag)})"

@@ -4,7 +4,7 @@ import random
 import pytest
 import stim
 
-from src.analysis.analyzer import CircuitAnalyzer
+from src.analysis.processor import CircuitProcessor
 from src.structure.dependency_dag import DependencyDAG
 
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
@@ -12,7 +12,7 @@ STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane
 
 def build(circuit: str | stim.Circuit) -> DependencyDAG:
     dag = DependencyDAG()
-    CircuitAnalyzer(dag).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit, "StatePrep")
+    CircuitProcessor(dag).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
     return dag
 
 
@@ -125,7 +125,7 @@ def test_predecessors_are_the_last_earlier_gates_on_each_qubit(seed: int):
 
 
 def build_scheduled(circuit: str | stim.Circuit) -> DependencyDAG:
-    return build(circuit)  # CircuitAnalyzer.run calls finalize()
+    return build(circuit)  # CircuitProcessor.run calls finalize()
 
 
 def schedule(dag: DependencyDAG) -> dict[int, tuple[int | None, int | None]]:

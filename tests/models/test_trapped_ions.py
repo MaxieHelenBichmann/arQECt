@@ -3,7 +3,7 @@ import pathlib
 import pytest
 import stim
 
-from src.analysis.analyzer import CircuitAnalyzer
+from src.analysis.processor import CircuitProcessor
 from src.models.hardware.trapped_ions import TrappedIonsModel
 from src.models.noise.noise import NoiseModel
 
@@ -29,7 +29,7 @@ def make_noise_model(
 
 def run(circuit: str | stim.Circuit, capacity: int, nr_zones: int, seed: int = 42, **noise_kwargs) -> TrappedIonsModel:
     model = TrappedIonsModel(capacity, nr_zones, make_noise_model(**noise_kwargs), seed)
-    CircuitAnalyzer(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit, "StatePrep")
+    CircuitProcessor(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
     return model
 
 
@@ -271,10 +271,7 @@ def test_steane_two_qubit_gates_are_executed_within_one_zone(capacity: int, nr_z
         def finalize(self) -> None:
             pass
 
-        def extractor(self, function) -> list:
-            return []
-
-    CircuitAnalyzer(model, CoLocationCheck()).run(STEANE, "StatePrep")
+    CircuitProcessor(model, CoLocationCheck()).run(STEANE)
 
     assert split_gates == []
 

@@ -6,7 +6,7 @@ but is not fit for capturing the overall connectivity or focusing on one specifi
 It is a gate-centered representation, where each gate is a node in the graph, and directed edges represent the immediate dependencies between gates.
 """
 
-from src.analysis import GateProcessor, GateDistributionAnalyzer
+from src.analysis.processor import GateProcessor
 import stim
 
 from collections import Counter
@@ -22,9 +22,6 @@ class GateDistribution(GateProcessor):
 
     def finalize(self) -> None:
         pass
-
-    def extractor(self, function) -> list[GateDistributionAnalyzer]:
-        return [GateDistributionAnalyzer(gd=self)]
 
     def __repr__(self) -> str:
         return f"GateDistribution()"

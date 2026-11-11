@@ -4,7 +4,7 @@ import pathlib
 import pytest
 import stim
 
-from src.analysis.analyzer import CircuitAnalyzer
+from src.analysis.processor import CircuitProcessor
 from src.models.hardware.neutral_atoms import NeutralAtomsModel, NeutralAtomsHardwareEvents
 from src.models.noise.noise import NoiseModel
 
@@ -33,7 +33,7 @@ def make_noise_model(
 
 def run(circuit: str | stim.Circuit, nr_pairs: int, readout_capacity: int, **noise_kwargs) -> NeutralAtomsModel:
     model = NeutralAtomsModel(nr_pairs, readout_capacity, make_noise_model(**noise_kwargs))
-    CircuitAnalyzer(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit, "StatePrep")
+    CircuitProcessor(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
     return model
 
 
@@ -286,10 +286,7 @@ def test_steane_zone_invariants_after_every_gate(nr_pairs: int, readout_capacity
         def finalize(self) -> None:
             pass
 
-        def extractor(self, function) -> list:
-            return []
-
-    CircuitAnalyzer(model, InvariantCheck()).run(STEANE_MEASURED, "StatePrep")
+    CircuitProcessor(model, InvariantCheck()).run(STEANE_MEASURED)
 
     assert violations == []
 
