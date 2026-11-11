@@ -111,6 +111,17 @@ def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = N
             visualize_sc_distribution(config, circuits, file_prefix)
 
 
+def circuits_subtitle(circuits: list[list[dict]]) -> str:
+    """Subtitle of every plot: the number of circuits and the mean of their per-circuit speedups (compile time / abstract
+    execution time, i.e. quotient first, then the mean)."""
+    speedups = []
+    for rows in circuits:
+        wall_clock_s = {row["source"]: float(row["value"]) for row in rows if row["metric"] == "wall_clock_s"}
+        speedups.append(wall_clock_s["compiled"] / wall_clock_s["abstract"])
+    speedup = f"{np.mean(speedups):.3g}×" if speedups else "n/a"
+    return f"number of circuits = {len(circuits)}   avg. speedup of abstract execution vs compilation: {speedup}"
+
+
 def style(fig, ax, title: str, subtitle: str, x_label: str, y_label: str, notes: tuple[str, ...] = ()) -> None:
     """Common look of all plots: axes, title + subtitle, axis labels and the legend below the plot (`notes` become
     text-only legend entries)."""
@@ -130,7 +141,7 @@ def style(fig, ax, title: str, subtitle: str, x_label: str, y_label: str, notes:
     fig.tight_layout()
 
 
-def plot_event_amount(qubit_shares: list[tuple[float, float, int]], title: str, x_label: str, y_label: str,
+def plot_event_amount(qubit_shares: list[tuple[float, float, int]], title: str, subtitle: str, x_label: str, y_label: str,
                       above_note: str, file: str, zero_events: str | None = None) -> None:
     """Per qubit its share of the circuit's compiled events (x) vs of the abstract events (y), colored by the qubit
     number of its circuit. Shares are ~1/n, so both axes are logarithmic: the diagonal stays the exact match and a
@@ -170,19 +181,19 @@ def plot_event_amount(qubit_shares: list[tuple[float, float, int]], title: str, 
         set_ticks([zero_at, *ticks] if has_zeros else ticks, [*(["0"] if has_zeros else []), *(f"{t:g}" for t in ticks)])
     ax.minorticks_off()
 
-    subtitle = f"number of qubits = {len(shares)}"
-    notes = [above_note, "one data point = one qubit, shares within its circuit (log scale)"]
+    notes = [f"number of qubits = {len(shares)}"]
     zero_header = f"Zero shares: the qubit has no {zero_events} of that kind in its circuit"
     if len(shares):
         m, a = shares[:, 0], shares[:, 1]
-        subtitle += f"   > 1.5× its compiled share: {np.mean(a > 1.5 * m):.0%}, < 1/1.5×: {np.mean(1.5 * a < m):.0%}"
+        notes.append(f"> 1.5× its compiled share: {np.mean(a > 1.5 * m):.0%}, < 1/1.5×: {np.mean(1.5 * a < m):.0%}"
+                     + ("" if zero_events else f",   zero share: {np.mean((m == 0) | (a == 0)):.0%}"))
+    notes += [above_note, "one data point = one qubit, shares within its circuit (log scale)"]
+    if len(shares):
         if zero_events:  # the zero shares are explained in the legend instead
             notes += [zero_header,
                       f"bottom row (missed): compiled {zero_events}, but no abstract ones: {np.mean((m > 0) & (a == 0)):.0%}",
                       f"left column (invented): abstract {zero_events}, but no compiled ones: {np.mean((m == 0) & (a > 0)):.0%}",
                       f"corner (correct): neither, the qubit is not involved: {np.mean((m == 0) & (a == 0)):.0%}"]
-        else:
-            subtitle += f"   zero share: {np.mean((m == 0) | (a == 0)):.0%}"
     style(fig, ax, title, subtitle, x_label, y_label, notes=tuple(notes))
     for text in ax.get_legend().get_texts():
         if text.get_text() == zero_header:
@@ -405,7 +416,6 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
         })
     scores.sort(key=lambda c: c["num_qubits"])  # larger circuits drawn on top
     qubits = [c["num_qubits"] for c in scores]
-    mean_speedup = np.mean([c["compiled_wall_clock_s"] / c["abstract_wall_clock_s"] for c in scores])  # per-circuit quotient, then mean
 
     # 2) the plots: (file name, title, x column, per-gate x column, y column, x label, y label, same quantity on both axes)
     plots = [
@@ -435,7 +445,7 @@ def visualize_ti_aggregated(config: str, circuits: list[list[dict]], file_prefix
             diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
             ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        subtitle = f"number of circuits = {len(xs)}   avg. speedup of abstract execution vs compilation: {mean_speedup:.3g}×"
+        subtitle = circuits_subtitle(circuits)
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
@@ -531,6 +541,8 @@ def visualize_ti_distribution(config: str, circuits: list[list[dict]], file_pref
     qubit_shifts_per_circuit = []  # per circuit: the event timing shift of each qubit
     qubit_shares = []  # per qubit: (share of the circuit's ion moves, share of the circuit's abstract IZ changes)
     nan = float("nan")
+    rows_of = {rows[0]["circuit"]: rows for rows in circuits}
+    amount_circuits = []  # the circuits in the event amount plot
     for rows in circuits:
         num_qubits = int(rows[0]["num_qubits"])
 
@@ -575,6 +587,7 @@ def visualize_ti_distribution(config: str, circuits: list[list[dict]], file_pref
             qubit_shifts_per_circuit.append(qubit_shifts)
         abstract_total, moves_total = sum(map(sum, abstract_per_qubit)), sum(map(sum, moves_per_qubit))
         if abstract_total and moves_total:
+            amount_circuits.append(rows)
             qubit_shares += [(sum(m) / moves_total, sum(a) / abstract_total, num_qubits)
                              for a, m in zip(abstract_per_qubit, moves_per_qubit) if len(a)]
 
@@ -619,7 +632,7 @@ def visualize_ti_distribution(config: str, circuits: list[list[dict]], file_pref
                         color=TEXT_SECONDARY, fontsize=9)
     ax.set_xticks(F1_TOLERANCES, [f"±{t}" if t else "exact" for t in F1_TOLERANCES])
     ax.set_ylim(0, 1.04)
-    style(fig, ax, f"{config}: IZ change location agreement", f"number of circuits = {len(scored)}",
+    style(fig, ax, f"{config}: IZ change location agreement", circuits_subtitle([rows_of[c["circuit"]] for c in scored]),
           "allowed anchor offset", "F1 score of IZ change slots",
           notes=("slot = one qubit's interval between two consecutive anchors",
                  "A / C = slots with ≥ 1 abstract / compiled IZ change",
@@ -641,14 +654,16 @@ def visualize_ti_distribution(config: str, circuits: list[list[dict]], file_pref
            label=f"unpaired IZ changes: {missing} missing, {extra} extra")
     ax.axvline(0, color=REFERENCE, linewidth=3, zorder=4)
     ax.set_xticks([-span - 2, *values, span + 2], ["missing", *(f"{v:+d}" if v else "0" for v in values), "extra"])
-    subtitle = "no paired IZ changes"
+    summary = "no paired IZ changes"
     if shifts:
-        subtitle = (f"{len(shifts)} paired: {shifts.count(0) / len(shifts):.0%} on time,"
+        summary = (f"{len(shifts)} paired: {shifts.count(0) / len(shifts):.0%} on time,"
                     f" {sum(s < 0 for s in shifts) / len(shifts):.0%} early, {sum(s > 0 for s in shifts) / len(shifts):.0%} late,"
                     f" mean shift {np.mean(shifts):+.2f} anchors")
-    style(fig, ax, f"{config}: IZ change timing (abstract vs compiled)", subtitle,
+    style(fig, ax, f"{config}: IZ change timing (abstract vs compiled)",
+          circuits_subtitle([rows_of[c["circuit"]] for c in scores]),
           "timing shift in anchors", "IZ changes (all circuits)",
-          notes=("shift = abstract - compiled anchor of a paired IZ change",
+          notes=(summary,
+                 "shift = abstract - compiled anchor of a paired IZ change",
                  "< 0: events too early, > 0: too late",
                  "missing: compiled IZ change without abstract one (too few events)",
                  "extra: abstract IZ change without compiled one (too many events)"))
@@ -678,7 +693,7 @@ def visualize_ti_distribution(config: str, circuits: list[list[dict]], file_pref
     ax.yaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
     ax.set_ylim(0, 1.04)
     scored = [c for c in scores if not np.isnan(c["qubits_on_time"])]
-    style(fig, ax, f"{config}: event timing, abstract vs compiled", f"number of circuits = {len(scored)}",
+    style(fig, ax, f"{config}: event timing, abstract vs compiled", circuits_subtitle([rows_of[c["circuit"]] for c in scored]),
           "anchor distance between the abstract event weight compared to the concrete event weight",
           "share of the circuit's qubits",
           notes=("per-qubit comparison of weight center (avg. anchor) of its compiled ion moves",
@@ -688,7 +703,7 @@ def visualize_ti_distribution(config: str, circuits: list[list[dict]], file_pref
     plt.close(fig)
 
     # B) event amount: per qubit its share of the circuit's abstract IZ changes vs of its ion moves
-    plot_event_amount(qubit_shares, f"{config}: event amount vs ion moves",
+    plot_event_amount(qubit_shares, f"{config}: event amount vs ion moves", circuits_subtitle(amount_circuits),
                       "qubit's share of the circuit's compiled ion moves", "qubit's share of the abstract IZ changes",
                       "above: more abstract events than its movement share, below: less", f"{file_prefix}__event_amount.png")
 
@@ -753,7 +768,6 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
         })
     scores.sort(key=lambda c: c["num_qubits"])  # larger circuits drawn on top
     qubits = [c["num_qubits"] for c in scores]
-    mean_speedup = np.mean([c["compiled_wall_clock_s"] / c["abstract_wall_clock_s"] for c in scores])  # per-circuit quotient, then mean
 
     # 2) the plots: (file name, title, x column, per-gate x column, y column, x label, y label, same quantity on both axes)
     plots = [
@@ -783,7 +797,7 @@ def visualize_na_aggregated(config: str, circuits: list[list[dict]], file_prefix
             diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
             ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        subtitle = f"number of circuits = {len(xs)}   avg. speedup of abstract execution vs compilation: {mean_speedup:.3g}×"
+        subtitle = circuits_subtitle(circuits)
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
@@ -847,6 +861,8 @@ def visualize_na_distribution(config: str, circuits: list[list[dict]], file_pref
     qubit_shifts_per_circuit = []  # per circuit: the event timing shift of each qubit
     qubit_shares = []  # per qubit: (share of the circuit's atom transports, share of the circuit's abstract zone changes)
     nan = float("nan")
+    rows_of = {rows[0]["circuit"]: rows for rows in circuits}
+    amount_circuits = []  # the circuits in the event amount plot
     for rows in circuits:
         num_qubits = int(rows[0]["num_qubits"])
 
@@ -895,6 +911,7 @@ def visualize_na_distribution(config: str, circuits: list[list[dict]], file_pref
             qubit_shifts_per_circuit.append(qubit_shifts)
         abstract_total, moves_total = sum(map(sum, abstract_per_qubit)), sum(map(sum, moves_per_qubit))
         if abstract_total and moves_total:
+            amount_circuits.append(rows)
             qubit_shares += [(sum(m) / moves_total, sum(a) / abstract_total, num_qubits)
                              for a, m in zip(abstract_per_qubit, moves_per_qubit) if len(a)]
 
@@ -939,7 +956,7 @@ def visualize_na_distribution(config: str, circuits: list[list[dict]], file_pref
                         color=TEXT_SECONDARY, fontsize=9)
     ax.set_xticks(F1_TOLERANCES, [f"±{t}" if t else "exact" for t in F1_TOLERANCES])
     ax.set_ylim(0, 1.04)
-    style(fig, ax, f"{config}: zone change location agreement", f"number of circuits = {len(scored)}",
+    style(fig, ax, f"{config}: zone change location agreement", circuits_subtitle([rows_of[c["circuit"]] for c in scored]),
           "allowed anchor offset", "F1 score of zone change slots",
           notes=("slot = one qubit's interval between two consecutive anchors",
                  "A / C = slots with ≥ 1 abstract / compiled zone change (storage ↔ EZ, EZ site)",
@@ -961,14 +978,16 @@ def visualize_na_distribution(config: str, circuits: list[list[dict]], file_pref
            label=f"unpaired zone changes: {missing} missing, {extra} extra")
     ax.axvline(0, color=REFERENCE, linewidth=3, zorder=4)
     ax.set_xticks([-span - 2, *values, span + 2], ["missing", *(f"{v:+d}" if v else "0" for v in values), "extra"])
-    subtitle = "no paired zone changes"
+    summary = "no paired zone changes"
     if shifts:
-        subtitle = (f"{len(shifts)} paired: {shifts.count(0) / len(shifts):.0%} on time,"
+        summary = (f"{len(shifts)} paired: {shifts.count(0) / len(shifts):.0%} on time,"
                     f" {sum(s < 0 for s in shifts) / len(shifts):.0%} early, {sum(s > 0 for s in shifts) / len(shifts):.0%} late,"
                     f" mean shift {np.mean(shifts):+.2f} anchors")
-    style(fig, ax, f"{config}: zone change timing (abstract vs compiled)", subtitle,
+    style(fig, ax, f"{config}: zone change timing (abstract vs compiled)",
+          circuits_subtitle([rows_of[c["circuit"]] for c in scores]),
           "timing shift in anchors", "zone changes (all circuits)",
-          notes=("shift = abstract - compiled anchor of a paired zone change (of the same kind)",
+          notes=(summary,
+                 "shift = abstract - compiled anchor of a paired zone change (of the same kind)",
                  "< 0: events too early, > 0: too late",
                  "missing: compiled zone change without abstract one (too few events)",
                  "extra: abstract zone change without compiled one (too many events)"))
@@ -998,7 +1017,7 @@ def visualize_na_distribution(config: str, circuits: list[list[dict]], file_pref
     ax.yaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
     ax.set_ylim(0, 1.04)
     scored = [c for c in scores if not np.isnan(c["qubits_on_time"])]
-    style(fig, ax, f"{config}: event timing, abstract vs compiled", f"number of circuits = {len(scored)}",
+    style(fig, ax, f"{config}: event timing, abstract vs compiled", circuits_subtitle([rows_of[c["circuit"]] for c in scored]),
           "anchor distance between the abstract event weight compared to the concrete event weight",
           "share of the circuit's qubits",
           notes=("per-qubit comparison of weight center (avg. anchor) of its compiled atom transports",
@@ -1008,7 +1027,7 @@ def visualize_na_distribution(config: str, circuits: list[list[dict]], file_pref
     plt.close(fig)
 
     # B) event amount: per qubit its share of the circuit's abstract zone changes vs of its atom transports
-    plot_event_amount(qubit_shares, f"{config}: event amount vs atom moves",
+    plot_event_amount(qubit_shares, f"{config}: event amount vs atom moves", circuits_subtitle(amount_circuits),
                       "qubit's share of the circuit's compiled atom transports", "qubit's share of the abstract zone changes",
                       "above: more abstract events than its movement share, below: less", f"{file_prefix}__event_amount.png")
 
@@ -1056,7 +1075,6 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
         })
     scores.sort(key=lambda c: c["num_qubits"])  # larger circuits drawn on top
     qubits = [c["num_qubits"] for c in scores]
-    mean_speedup = np.mean([c["compiled_wall_clock_s"] / c["abstract_wall_clock_s"] for c in scores])  # per-circuit quotient, then mean
 
     # 2) the plots: (file name, title, x column, per-gate x column, y column, x label, y label, same quantity on both axes)
     plots = [
@@ -1080,7 +1098,7 @@ def visualize_sc_aggregated(config: str, circuits: list[list[dict]], file_prefix
             diagonal = [x_zero or x_lo, x_end]  # through the zero strip's (0, 0) as well
             ax.plot(diagonal, diagonal, color=REFERENCE, linewidth=3, zorder=2, label="exact match")
 
-        subtitle = f"number of circuits = {len(xs)}   avg. speedup of abstract execution vs compilation: {mean_speedup:.3g}×"
+        subtitle = circuits_subtitle(circuits)
 
         # the circuits: per-gate model hollow, abstract model colored by qubit number; one circuit after the other its white outline,
         # then the line connecting its two points (see connect_per_gate), then its fill, so the line reaches the dot over the outline
@@ -1135,6 +1153,8 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
     qubit_shifts_per_circuit = []  # per circuit: the event timing shift of each qubit
     qubit_shares = []  # per qubit: (share of the circuit's compiled swaps, share of the circuit's abstract swaps)
     nan = float("nan")
+    rows_of = {rows[0]["circuit"]: rows for rows in circuits}
+    amount_circuits = []  # the circuits in the event amount plot
     for rows in circuits:
         num_qubits = int(rows[0]["num_qubits"])
 
@@ -1164,6 +1184,7 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
             qubit_shifts_per_circuit.append(qubit_shifts)
         abstract_total, moves_total = sum(map(sum, abstract_per_qubit)), sum(map(sum, moves_per_qubit))
         if abstract_total and moves_total:
+            amount_circuits.append(rows)
             qubit_shares += [(sum(m) / moves_total, sum(a) / abstract_total, num_qubits)
                              for a, m in zip(abstract_per_qubit, moves_per_qubit) if len(a)]
 
@@ -1206,7 +1227,7 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
     ax.yaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
     ax.set_ylim(0, 1.04)
     scored = [c for c in scores if not np.isnan(c["qubits_on_time"])]
-    style(fig, ax, f"{config}: event timing, abstract vs compiled", f"number of circuits = {len(scored)}",
+    style(fig, ax, f"{config}: event timing, abstract vs compiled", circuits_subtitle([rows_of[c["circuit"]] for c in scored]),
           "anchor distance between the abstract event weight compared to the concrete event weight",
           "share of the circuit's qubits",
           notes=("per-qubit comparison of weight center (avg. anchor) of its compiled swaps",
@@ -1216,7 +1237,7 @@ def visualize_sc_distribution(config: str, circuits: list[list[dict]], file_pref
     plt.close(fig)
 
     # event amount: per qubit its share of the circuit's abstract swaps vs of its compiled swaps
-    plot_event_amount(qubit_shares, f"{config}: event amount vs compiled swaps",
+    plot_event_amount(qubit_shares, f"{config}: event amount vs compiled swaps", circuits_subtitle(amount_circuits),
                       "qubit's share of the circuit's compiled swaps", "qubit's share of the abstract swaps",
                       "above: more abstract events than its compiled share, below: less", f"{file_prefix}__event_amount.png",
                       zero_events="swaps")
