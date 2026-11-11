@@ -12,7 +12,7 @@ Different hardware-architectures can be modeled by varying the capacity of the z
 """
 import random
 from collections import defaultdict
-from src.analysis.analyzer import GateProcessor
+from src.analysis import GateProcessor, MetricExtractor, CircuitFunction
 from src.models.noise.noise import ErrorChannel, NoiseModel
 import stim
 from src.models.common import HardwareEventLocation, NoiseTag
@@ -123,6 +123,9 @@ class NeutralAtomsModel(GateProcessor):
 
     def finalize(self) -> None:
         pass
+
+    def extractor(self, function: CircuitFunction) -> list[MetricExtractor]:
+        return []
     
     def _add_qubit_to_entanglement_pair(self, qubit: int, pair_id: int) -> None:
         if len(self._entanglement_zone[pair_id]) >= 2: 

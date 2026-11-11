@@ -5,7 +5,7 @@ This representation is useful for analyzing the transformation acting on each in
 It is a qubit-centered representation, where each qubit has a timeline of gates acting on it and partners it interacts with, represented as entries in the timeline.
 """
 
-from src.analysis.analyzer import GateProcessor
+from src.analysis import GateProcessor, QubitTimelinesAnalyzer
 import stim
 from dataclasses import dataclass
 from collections import defaultdict
@@ -39,6 +39,9 @@ class QubitTimelines(GateProcessor):
 
     def finalize(self) -> None:
         pass
+
+    def extractor(self, function) -> list[QubitTimelinesAnalyzer]:
+        return [QubitTimelinesAnalyzer(qtl=self)]
 
     def __repr__(self) -> str:
         return f"QubitTimelines(nr_qubits={len(self.timelines)})"

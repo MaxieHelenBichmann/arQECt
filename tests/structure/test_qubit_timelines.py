@@ -17,7 +17,7 @@ def EN(partner: int) -> TimelineGate:
 
 def build(circuit: str | stim.Circuit) -> QubitTimelines:
     timelines = QubitTimelines()
-    CircuitAnalyzer(timelines).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
+    CircuitAnalyzer(timelines).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit, "StatePrep")
     return timelines
 
 

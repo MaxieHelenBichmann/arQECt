@@ -10,7 +10,7 @@ import stim
 import yaml
 from collections.abc import Callable
 
-from src.models.hardware import HardwareModel, HardwareEvents
+from src.models.hardware import HardwareModel, HardwareEvents, PlatformTag
 
 from benchmarks.model_accuracy.compilation import (run_ti_compiler, run_na_compiler, run_sc_compiler, run_ti_abstraction, run_na_abstraction,
                                                    run_sc_abstraction, run_ti_baseline, run_na_baseline, run_sc_baseline)
@@ -21,32 +21,32 @@ _CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / 
 _CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / "circuits"
 _RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "model_accuracy"
 
-_PREPARE_HARDWARE : dict[str, Callable[[dict, int], tuple[HardwareModel, HardwareArchitecture | dict]]] = {
+_PREPARE_HARDWARE : dict[PlatformTag, Callable[[dict, int], tuple[HardwareModel, HardwareArchitecture | dict]]] = {
     "TI": prepare_ti_hardware,
     "NA": prepare_na_hardware,
     "SC": prepare_sc_hardware
 }
 
-_RUN_BASELINE : dict[str, Callable[[stim.Circuit], tuple[HardwareModel, HardwareEvents | dict]]] = {
+_RUN_BASELINE : dict[PlatformTag, Callable[[stim.Circuit], tuple[HardwareModel, HardwareEvents | dict]]] = {
     "TI": run_ti_baseline,
     "NA": run_na_baseline,
     "SC": run_sc_baseline
 }
 
-_RUN_ABSTRACTION : dict[str, Callable[[HardwareModel,  stim.Circuit], tuple[HardwareModel, HardwareEvents | dict]]] = {
+_RUN_ABSTRACTION : dict[PlatformTag, Callable[[HardwareModel,  stim.Circuit], tuple[HardwareModel, HardwareEvents | dict]]] = {
     "TI": run_ti_abstraction,
     "NA": run_na_abstraction,
     "SC": run_sc_abstraction
 }
 
-_RUN_COMPILER : dict[str, Callable[[HardwareArchitecture | dict, stim.Circuit, float], tuple[HardwareModel, HardwareEvents | dict]]] = {
+_RUN_COMPILER : dict[PlatformTag, Callable[[HardwareArchitecture | dict, stim.Circuit, float], tuple[HardwareModel, HardwareEvents | dict]]] = {
     "TI": run_ti_compiler,
     "NA": run_na_compiler,
     "SC": run_sc_compiler
 }
 
 
-def run(platforms: list[str] | None = None, max_qubits: int | None = None, max_compile_time: float = 600.0, clean: bool = False,
+def run(platforms: list[PlatformTag] | None = None, max_qubits: int | None = None, max_compile_time: float = 600.0, clean: bool = False,
         append: bool = False, only_visual: bool = False) -> None:
     if only_visual:
         visualize(platforms or ["TI", "NA", "SC"], _RESULTS_DIR, max_qubits)

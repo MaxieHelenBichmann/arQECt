@@ -29,7 +29,7 @@ def make_noise_model(
 
 def run(circuit: str | stim.Circuit, capacity: int, nr_zones: int, seed: int = 42, **noise_kwargs) -> TrappedIonsModel:
     model = TrappedIonsModel(capacity, nr_zones, make_noise_model(**noise_kwargs), seed)
-    CircuitAnalyzer(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
+    CircuitAnalyzer(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit, "StatePrep")
     return model
 
 
@@ -271,7 +271,10 @@ def test_steane_two_qubit_gates_are_executed_within_one_zone(capacity: int, nr_z
         def finalize(self) -> None:
             pass
 
-    CircuitAnalyzer(model, CoLocationCheck()).run(STEANE)
+        def extractor(self, function) -> list:
+            return []
+
+    CircuitAnalyzer(model, CoLocationCheck()).run(STEANE, "StatePrep")
 
     assert split_gates == []
 

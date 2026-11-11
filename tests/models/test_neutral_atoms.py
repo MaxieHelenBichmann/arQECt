@@ -33,7 +33,7 @@ def make_noise_model(
 
 def run(circuit: str | stim.Circuit, nr_pairs: int, readout_capacity: int, **noise_kwargs) -> NeutralAtomsModel:
     model = NeutralAtomsModel(nr_pairs, readout_capacity, make_noise_model(**noise_kwargs))
-    CircuitAnalyzer(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
+    CircuitAnalyzer(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit, "StatePrep")
     return model
 
 
@@ -286,7 +286,10 @@ def test_steane_zone_invariants_after_every_gate(nr_pairs: int, readout_capacity
         def finalize(self) -> None:
             pass
 
-    CircuitAnalyzer(model, InvariantCheck()).run(STEANE_MEASURED)
+        def extractor(self, function) -> list:
+            return []
+
+    CircuitAnalyzer(model, InvariantCheck()).run(STEANE_MEASURED, "StatePrep")
 
     assert violations == []
 

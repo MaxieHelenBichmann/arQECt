@@ -5,7 +5,7 @@ This representation is useful for analyzing the overall connectivity and interac
 It is a structure-centered representation, where each qubit is a node in the graph, and edges represent interactions between qubits, weighted by the number of interactions.
 """
 
-from src.analysis.analyzer import GateProcessor
+from src.analysis import GateProcessor, InteractionGraphAnalyzer
 import stim
 from collections import defaultdict
 
@@ -24,6 +24,9 @@ class InteractionGraph(GateProcessor):
 
     def finalize(self) -> None:
         pass
+
+    def extractor(self, function) -> list[InteractionGraphAnalyzer]:
+        return [InteractionGraphAnalyzer(wig=self)]
 
     def __repr__(self) -> str:
         nr_edges = sum(len(neighbors) for neighbors in self.graph.values()) // 2

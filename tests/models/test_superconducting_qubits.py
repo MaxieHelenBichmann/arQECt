@@ -41,7 +41,7 @@ def run(
     circuit: str | stim.Circuit, nr_qubits: int, topology: dict[int, int], **noise_kwargs
 ) -> SuperconductingQubitsModel:
     model = make_model(nr_qubits, topology, **noise_kwargs)
-    CircuitAnalyzer(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
+    CircuitAnalyzer(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit, "StatePrep")
     return model
 
 
@@ -301,7 +301,10 @@ def test_steane_neighborhood_invariants_after_every_gate(topology: dict[int, int
         def finalize(self) -> None:
             pass
 
-    CircuitAnalyzer(model, InvariantCheck()).run(STEANE_MEASURED)
+        def extractor(self, function) -> list:
+            return []
+
+    CircuitAnalyzer(model, InvariantCheck()).run(STEANE_MEASURED, "StatePrep")
 
     assert violations == []
 

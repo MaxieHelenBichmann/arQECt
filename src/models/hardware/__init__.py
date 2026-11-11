@@ -5,7 +5,9 @@ from src.models.hardware.neutral_atoms import NeutralAtomsModel, NeutralAtomsHar
 from src.models.hardware.superconducting_qubits import SuperconductingQubitsModel, SuperconductingQubitsHardwareEvents
 from src.models.noise.noise import NoiseModel
 
+from typing import Literal
 
+PlatformTag = Literal["TI", "SC", "NA"]
 HardwareModel = TrappedIonsModel | NeutralAtomsModel | SuperconductingQubitsModel
 Model = HardwareModel | NoiseModel
 

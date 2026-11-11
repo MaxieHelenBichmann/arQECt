@@ -15,7 +15,7 @@ import random
 from collections import defaultdict
 
 from src.models.noise.noise import ErrorChannel, NoiseModel
-from src.analysis.analyzer import GateProcessor
+from src.analysis import GateProcessor, MetricExtractor, CircuitFunction
 from src.models.common import HardwareEventLocation, NoiseTag
 
 from dataclasses import dataclass, field
@@ -124,6 +124,9 @@ class TrappedIonsModel(GateProcessor):
 
     def finalize(self) -> None:
         pass
+
+    def extractor(self, function: CircuitFunction) -> list[MetricExtractor]:
+        return []
 
     def _choose_zone(self, qubit_count: int) -> int:
         def eviction_cost(zone: dict[int, int]) -> tuple[int, int]:
