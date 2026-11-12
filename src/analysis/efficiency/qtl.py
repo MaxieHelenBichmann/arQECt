@@ -19,6 +19,18 @@ class QubitTimelinesAnalyzer(MetricExtractor):
 
     def analyze(self) -> dict[str, object]:
         result: dict[str, object] = {}
+
+        # reuse metrics
+        result["average_interaction_reuse_distance"] = self._average_interaction_reuse_distance()
+        result["share_partner_reusing_qubits"] = self._share_partner_reusing_qubits()
+        result["capacity_constrained_reuse"] = self._capacity_constrained_reuse()
+        result["partner_switching_frequency"] = self._partner_switching_frequency()
+        result["zone_switching_frequency"] = self._zone_switching_frequency()
+
+        # composition
+        result["share_mid_circuit_measurements"] = self._share_mid_circuit_measurements()
+        result["_average_1q_run_length"] = self._average_1q_run_length()
+        result["_activity_imbalance"] = self._activity_imbalance()
         return result
 
     def _average_interaction_reuse_distance(self) -> float:
