@@ -6,23 +6,17 @@ import stim
 
 from typing import TYPE_CHECKING
 from src.analysis import CircuitFunction
-from src.analysis.analyzer import CircuitAnalyzer
+from src.analysis.analyzer import CircuitAnalysisResult
 from src.models.hardware import TrappedIonsModel, SuperconductingQubitsModel, NeutralAtomsModel, HardwareModel
 
 
 class CircuitEvaluator:
         def __init__(self, hardware: HardwareModel):
             self.hardware = hardware
-            self.cost: float | None = None
-            
 
-        def evaluate(self, circuit: stim.Circuit, function: CircuitFunction):
-            # 1.) Analyze the circuit
-            analyzer : CircuitAnalyzer = CircuitAnalyzer(self.hardware)
-            analyzer.analyze(circuit=circuit, function=function)
-
-            # 2.) Evaluate the extracted metrics
-            return self._cost_function(analyzer.metrics)
+        def evaluate(self, analysis: CircuitAnalysisResult) -> float:
+            """Evaluate the extracted circuit properties."""
+            return self._cost_function(analysis.metrics)
 
 
         def _cost_function(self, metrics : dict[str, object]) -> float:

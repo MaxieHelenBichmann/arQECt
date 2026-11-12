@@ -16,4 +16,4 @@ class InteractionGraphAnalyzer(MetricExtractor):
         self.hw = hardware
 
     def analyze(self) -> dict[str, object]:
-        {}
+        return {}

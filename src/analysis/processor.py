@@ -15,7 +15,7 @@ class CircuitProcessor:
         self.processors = processors
 
     def run(self, circuit: stim.Circuit): 
-        """Processing each gate simultaneously with the provided processors."""
+        """Process each gate simultaneously with the provided processors."""
         for op in circuit: # only one circuit pass necessary
             if isinstance(op, stim.CircuitRepeatBlock):
                 raise ValueError("unsupported instruction: REPEAT blocks")

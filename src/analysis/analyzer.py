@@ -15,19 +15,24 @@ from src.analysis.efficiency.gd import GateDistributionAnalyzer
 from src.analysis.quality.encoder import EncoderCircuitAnalyzer
 from src.analysis.quality.state_prep import StatePreparationCircuitAnalyzer
 from src.analysis.quality.syndrome_extract import SyndromeExtractionAnalyzer
-
+from dataclasses import dataclass
 
 if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
+
+@dataclass
+class CircuitAnalysisResult:
+    """Interface between Circuit Analysis and Circuit Evaluation."""
+    metrics : None | dict = None
 
 
 class CircuitAnalyzer:
         def __init__(self, hardware: HardwareModel):
             self.hardware = hardware
-            self.metrics = {}
             
 
-        def analyze(self, circuit: stim.Circuit, function: CircuitFunction):
+        def analyze(self, circuit: stim.Circuit, function: CircuitFunction) -> CircuitAnalysisResult:
+            """Analyze static and dynamic circuit properties dependent on the hardware."""
             dag = DependencyDAG()
             gd = GateDistribution()
             wig = InteractionGraph()
@@ -38,6 +43,7 @@ class CircuitAnalyzer:
             processor.run(circuit=circuit)
 
             # 2.) Extract the metrics
+            metrics = {}
             efficiency_analyzer : list[MetricExtractor] = [
                 DependencyDAGAnalyzer(dag, self.hardware),
                 GateDistributionAnalyzer(gd, self.hardware),
@@ -52,6 +58,10 @@ class CircuitAnalyzer:
                     quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware) ]
                 case "Syndrome": 
                     quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware) ]
+                case _:
+                    quality_analyzer = []
                   
             for analyzer in efficiency_analyzer + quality_analyzer:
-                self.metrics.update(analyzer.analyze())
+                metrics.update(analyzer.analyze())
+
+            return CircuitAnalysisResult(metrics=metrics)
