@@ -56,7 +56,7 @@ class DependencyDAGAnalyzer(MetricExtractor):
             depth_2q[i] = d + (len(g.qubits) == 2)
         return max(depth_2q.values(), default=0)
     
-    def _critical_path_duration(self) -> float | None:
+    def _critical_path_duration(self) -> float | None: # in unit of given durations
         """Longest dependency chain weighted by the hardware's gate durations.
 
         Range [0, inf), in the same time unit as the gate durations; 0 for an empty circuit.
@@ -76,10 +76,6 @@ class DependencyDAGAnalyzer(MetricExtractor):
                 duration = self.hw.gate_durations["SN"]
             finish[i] = max((finish[p] for p in g.predecessors), default=0.0) + duration
         return max(finish.values(), default=0.0)
-
-    def _nr_gates(self) -> int:
-        """Total number of gates. Lower is better."""
-        return len(self.dag.dag)
 
     def _average_scheduling_slack(self) -> float:
         """Mean slack (ALAP - ASAP time) per gate, i.e. by how many layers a gate can be shifted without increasing depth.
