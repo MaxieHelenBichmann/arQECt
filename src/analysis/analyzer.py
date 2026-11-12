@@ -9,7 +9,7 @@ from src.analysis import CircuitFunction, MetricExtractor
 from src.structure import GateDistribution, InteractionGraph, DependencyDAG, QubitTimelines
 from src.analysis.processor import CircuitProcessor
 from src.analysis.efficiency.dag import DependencyDAGAnalyzer
-from src.analysis.efficiency.wip import InteractionGraphAnalyzer
+from src.analysis.efficiency.wig import InteractionGraphAnalyzer
 from src.analysis.efficiency.qtl import QubitTimelinesAnalyzer
 from src.analysis.efficiency.gd import GateDistributionAnalyzer
 from src.analysis.quality.encoder import EncoderCircuitAnalyzer
