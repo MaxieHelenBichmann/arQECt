@@ -20,7 +20,7 @@ class DependencyDAGAnalyzer(MetricExtractor):
         self.dag = dag
         self.hw = hardware
 
-    def analyze(self) -> dict[str, object]:
+    def analyze(self) -> dict[str, object]: # assume valid hardware parameters (especially capacities/durations >0), dag completed with .finalize()
         result : dict[str, object] = {}
 
         # parallelizability
