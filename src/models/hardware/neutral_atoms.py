@@ -31,7 +31,7 @@ class NeutralAtomsHardwareEvents: # no order
 # TODO: does this 1q/2q gate distinction make sense here on this level, bc probably the 2q gates are will be decomposed into 1q and 2q gates during compilation, aka they aren't reused in the ent zone anyway?
 
 class NeutralAtomsModel(GateProcessor):
-    def __init__(self, entanglement_zone_capacity: int, readout_zone_capacity: int, noise_model: NoiseModel | None = None, seed: int = 42):
+    def __init__(self, entanglement_zone_capacity: int, readout_zone_capacity: int, native_gates: set[stim.CircuitInstruction], noise_model: NoiseModel | None = None, seed: int = 42):
         # entanglement_zone_capacity in qubit PAIRS
         # assume that storage_zone_capacity >= qubits in the circuit
         if entanglement_zone_capacity < 1:
@@ -42,6 +42,7 @@ class NeutralAtomsModel(GateProcessor):
         self.entanglement_zone_capacity: int = entanglement_zone_capacity
         self.readout_zone_capacity: int = readout_zone_capacity
         self.noise_model: NoiseModel = noise_model if noise_model is not None else NoiseModel.empty()
+        self.native_gates : set[stim.CircuitInstruction] = native_gates
         self._rng: random.Random = random.Random(seed)
         self.hardware_events: NeutralAtomsHardwareEvents = NeutralAtomsHardwareEvents()
 

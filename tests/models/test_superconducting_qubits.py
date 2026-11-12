@@ -10,6 +10,7 @@ from src.models.hardware.superconducting_qubits import SuperconductingQubitsMode
 from src.models.noise.noise import NoiseModel
 
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
+NATIVE_GATES: set[stim.CircuitInstruction] = {stim.CircuitInstruction(name, []) for name in ("CX", "H", "S", "M", "R")}
 STEANE_MEASURED = STEANE + stim.Circuit("M 0 1 2 3 4 5 6")
 
 DURATIONS: dict[GateKind, float] = {"SN": 1.0, "EN": 2.0, "MS": 5.0}
@@ -34,7 +35,7 @@ def make_noise_model(
 
 
 def make_model(nr_qubits: int, topology: dict[int, int], seed: int = 42, **noise_kwargs) -> SuperconductingQubitsModel:
-    return SuperconductingQubitsModel(nr_qubits, DURATIONS, topology, make_noise_model(**noise_kwargs), seed)
+    return SuperconductingQubitsModel(nr_qubits, DURATIONS, topology, NATIVE_GATES, make_noise_model(**noise_kwargs), seed)
 
 
 def run(

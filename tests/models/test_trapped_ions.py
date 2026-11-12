@@ -8,6 +8,7 @@ from src.models.hardware.trapped_ions import TrappedIonsModel
 from src.models.noise.noise import NoiseModel
 
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
+NATIVE_GATES: set[stim.CircuitInstruction] = {stim.CircuitInstruction(name, []) for name in ("CX", "H", "S", "M", "R")}
 
 
 def make_noise_model(
@@ -28,7 +29,7 @@ def make_noise_model(
 
 
 def run(circuit: str | stim.Circuit, capacity: int, nr_zones: int, seed: int = 42, **noise_kwargs) -> TrappedIonsModel:
-    model = TrappedIonsModel(capacity, nr_zones, make_noise_model(**noise_kwargs), seed)
+    model = TrappedIonsModel(capacity, nr_zones, NATIVE_GATES, make_noise_model(**noise_kwargs), seed)
     CircuitProcessor(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
     return model
 
@@ -121,7 +122,7 @@ def test_two_qubit_gate_partial_cache_hit_moves_uncached_qubit_to_partner():
 
 
 def test_two_qubit_gate_in_different_zones_moves_target_to_source():
-    model = TrappedIonsModel(2, 2, make_noise_model())
+    model = TrappedIonsModel(2, 2, NATIVE_GATES, make_noise_model())
     model._zones[0][0] = 0
     model._zones[1][1] = 1
     model._lru_time_step = 2
@@ -149,7 +150,7 @@ def test_two_qubit_gate_partial_cache_hit_does_not_evict_partner():
 
 
 def test_choose_zone_prefers_zones_with_free_capacity():
-    model = TrappedIonsModel(2, 2, make_noise_model())
+    model = TrappedIonsModel(2, 2, NATIVE_GATES, make_noise_model())
     model._zones[0].update({0: 0, 1: 1})
 
     assert model._choose_zone(1) == 1
@@ -157,7 +158,7 @@ def test_choose_zone_prefers_zones_with_free_capacity():
 
 
 def test_choose_zone_minimizes_summed_lru_times_of_evicted_qubits():
-    model = TrappedIonsModel(2, 2, make_noise_model())
+    model = TrappedIonsModel(2, 2, NATIVE_GATES, make_noise_model())
     model._zones[0].update({0: 5, 1: 6})
     model._zones[1].update({2: 1, 3: 20})
 
@@ -166,7 +167,7 @@ def test_choose_zone_minimizes_summed_lru_times_of_evicted_qubits():
 
 
 def test_choose_zone_for_two_qubits_prefers_zones_with_one_spot_left():
-    model = TrappedIonsModel(3, 3, make_noise_model())
+    model = TrappedIonsModel(3, 3, NATIVE_GATES, make_noise_model())
     model._zones[0].update({0: 10, 1: 11})  # one spot left: one eviction
     model._zones[1].update({2: 0, 3: 1, 4: 2})  # full: two evictions, but oldest qubits
     model._zones[2].update({5: 12, 6: 13})  # one spot left: one eviction, but newer qubits
@@ -258,7 +259,7 @@ def test_steane_zone_invariants(capacity: int, nr_zones: int, seed: int):
 
 @pytest.mark.parametrize("capacity, nr_zones", [(2, 1), (3, 3), (4, 2), (7, 1), (7, 3)])
 def test_steane_two_qubit_gates_are_executed_within_one_zone(capacity: int, nr_zones: int):
-    model = TrappedIonsModel(capacity, nr_zones, make_noise_model())
+    model = TrappedIonsModel(capacity, nr_zones, NATIVE_GATES, make_noise_model())
     split_gates = []
 
     class CoLocationCheck:

@@ -9,6 +9,7 @@ from src.models.hardware.neutral_atoms import NeutralAtomsModel, NeutralAtomsHar
 from src.models.noise.noise import NoiseModel
 
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
+NATIVE_GATES: set[stim.CircuitInstruction] = {stim.CircuitInstruction(name, []) for name in ("CX", "H", "S", "M", "R")}
 STEANE_MEASURED = STEANE + stim.Circuit("M 0 1 2 3 4 5 6")
 
 NO_EVENTS = {f.name: 0 for f in dataclasses.fields(NeutralAtomsHardwareEvents)}
@@ -32,7 +33,7 @@ def make_noise_model(
 
 
 def run(circuit: str | stim.Circuit, nr_pairs: int, readout_capacity: int, **noise_kwargs) -> NeutralAtomsModel:
-    model = NeutralAtomsModel(nr_pairs, readout_capacity, make_noise_model(**noise_kwargs))
+    model = NeutralAtomsModel(nr_pairs, readout_capacity, NATIVE_GATES, make_noise_model(**noise_kwargs))
     CircuitProcessor(model).run(stim.Circuit(circuit) if isinstance(circuit, str) else circuit)
     return model
 
@@ -66,7 +67,7 @@ def without_noise(circuit: stim.Circuit) -> stim.Circuit:
 @pytest.mark.parametrize("nr_pairs, readout_capacity", [(0, 1), (1, 0), (-1, 1)])
 def test_invalid_capacities_are_rejected(nr_pairs: int, readout_capacity: int):
     with pytest.raises(ValueError):
-        NeutralAtomsModel(nr_pairs, readout_capacity, make_noise_model())
+        NeutralAtomsModel(nr_pairs, readout_capacity, NATIVE_GATES, make_noise_model())
 
 
 # ---------------------------------------------------------------- single-qubit gates and readout zone
@@ -143,7 +144,7 @@ def test_two_qubit_gate_partial_cache_hit_evicts_the_other_qubit_not_the_partner
 
 
 def test_two_qubit_gate_in_different_pairs_moves_target_to_source_pair():
-    model = NeutralAtomsModel(2, 1, make_noise_model())
+    model = NeutralAtomsModel(2, 1, NATIVE_GATES, make_noise_model())
     model._entanglement_zone[0][0] = 0
     model._entanglement_zone[1][1] = 1
     model._lru_time_step = 2
@@ -155,7 +156,7 @@ def test_two_qubit_gate_in_different_pairs_moves_target_to_source_pair():
 
 
 def test_two_qubit_gate_in_different_pairs_evicts_from_full_source_pair():
-    model = NeutralAtomsModel(2, 1, make_noise_model())
+    model = NeutralAtomsModel(2, 1, NATIVE_GATES, make_noise_model())
     model._entanglement_zone[0].update({0: 0, 5: 1})
     model._entanglement_zone[1][1] = 2
     model._lru_time_step = 3
@@ -192,14 +193,14 @@ def test_single_qubit_gate_moves_qubit_from_entanglement_back_to_storage():
 
 
 def test_choose_pair_prefers_empty_pairs():
-    model = NeutralAtomsModel(2, 1, make_noise_model())
+    model = NeutralAtomsModel(2, 1, NATIVE_GATES, make_noise_model())
     model._entanglement_zone[0].update({0: 0, 1: 1})
 
     assert model._choose_pair() == 1
 
 
 def test_choose_pair_prefers_pairs_with_fewer_qubits_over_older_qubits():
-    model = NeutralAtomsModel(2, 1, make_noise_model())
+    model = NeutralAtomsModel(2, 1, NATIVE_GATES, make_noise_model())
     model._entanglement_zone[0].update({0: 0, 1: 1})
     model._entanglement_zone[1][2] = 5
 
@@ -207,7 +208,7 @@ def test_choose_pair_prefers_pairs_with_fewer_qubits_over_older_qubits():
 
 
 def test_choose_pair_minimizes_summed_lru_times_of_evicted_qubits():
-    model = NeutralAtomsModel(2, 1, make_noise_model())
+    model = NeutralAtomsModel(2, 1, NATIVE_GATES, make_noise_model())
     model._entanglement_zone[0].update({0: 5, 1: 6})
     model._entanglement_zone[1].update({2: 1, 3: 20})
 
@@ -262,7 +263,7 @@ def test_no_noise_adds_no_identity_instructions():
 @pytest.mark.parametrize("nr_pairs, readout_capacity", [(1, 1), (1, 3), (2, 1), (3, 3), (7, 7)])
 @pytest.mark.parametrize("seed", range(5))
 def test_steane_zone_invariants_after_every_gate(nr_pairs: int, readout_capacity: int, seed: int):
-    model = NeutralAtomsModel(nr_pairs, readout_capacity, make_noise_model(), seed)
+    model = NeutralAtomsModel(nr_pairs, readout_capacity, NATIVE_GATES, make_noise_model(), seed)
     violations = []
 
     class InvariantCheck:

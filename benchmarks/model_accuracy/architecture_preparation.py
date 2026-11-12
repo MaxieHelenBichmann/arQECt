@@ -5,6 +5,7 @@ import math
 from collections import Counter
 
 import networkx as nx
+import stim
 
 from src.models.hardware import ( TrappedIonsModel, NeutralAtomsModel, SuperconductingQubitsModel)
 from mqt.ionshuttler.linear import Architecture as TIArchitecture
@@ -12,6 +13,11 @@ from mqt.qmap.sc import Architecture as SCArchitecture
 from mqt.qmap.na.zoned import ZonedNeutralAtomArchitecture
 
 HardwareArchitecture = TIArchitecture | SCArchitecture | ZonedNeutralAtomArchitecture 
+
+# native gate sets (target-less stim instructions), matching the 1-to-1 transpilation in compilation.py
+TI_NATIVE_GATES: set[stim.CircuitInstruction] = {stim.CircuitInstruction(name, []) for name in ("SQRT_XX", "SQRT_X", "SQRT_Y", "M", "R")}
+NA_NATIVE_GATES: set[stim.CircuitInstruction] = {stim.CircuitInstruction(name, []) for name in ("CZ", "H", "S", "M", "R")}
+SC_NATIVE_GATES: set[stim.CircuitInstruction] = {stim.CircuitInstruction(name, []) for name in ("CX", "H", "S", "M", "R")}
 
 def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsModel, TIArchitecture | dict]:
     """Construct a trapped ion architecture as the abstract model and the concrete MQT IonShuttler hardware.
@@ -42,7 +48,7 @@ def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsM
     else:
         raise ValueError(f"Unsupported trapped ion architecture {parameters['topology']!r} (linear, ring, grid).")
 
-    abstract_model = TrappedIonsModel(interaction_zone_capacity=capacity, nr_interaction_sites=nr_zones)
+    abstract_model = TrappedIonsModel(interaction_zone_capacity=capacity, nr_interaction_sites=nr_zones, native_gates=TI_NATIVE_GATES)
     return abstract_model, concrete_hardware
 
 def prepare_na_hardware(parameters: dict, num_qubits: int) -> tuple[NeutralAtomsModel, ZonedNeutralAtomArchitecture]:
@@ -80,7 +86,8 @@ def prepare_na_hardware(parameters: dict, num_qubits: int) -> tuple[NeutralAtoms
     concrete_hardware = ZonedNeutralAtomArchitecture.from_json_string(json.dumps(spec))
 
     readout_rows, readout_cols = parameters["readout_zone_size"]
-    abstract_model = NeutralAtomsModel(entanglement_zone_capacity=nr_ezs * ez_rows * ez_cols, readout_zone_capacity=readout_rows * readout_cols)
+    abstract_model = NeutralAtomsModel(entanglement_zone_capacity=nr_ezs * ez_rows * ez_cols, readout_zone_capacity=readout_rows * readout_cols,
+                                       native_gates=NA_NATIVE_GATES)
     return abstract_model, concrete_hardware
 
 
@@ -138,5 +145,5 @@ def prepare_sc_hardware(parameters: dict, num_qubits: int) -> tuple[Superconduct
 
     concrete_hardware = SCArchitecture(num_qubits, {edge for u, v in chip.edges for edge in [(u, v), (v, u)]})  # bidirectional
     abstract_model = SuperconductingQubitsModel(number_of_qubits=num_qubits, topology=dict(Counter(d for _, d in chip.degree)),
-                                                gate_durations={"SN": 1, "MS": 1, "EN": 1})
+                                                gate_durations={"SN": 1, "MS": 1, "EN": 1}, native_gates=SC_NATIVE_GATES)
     return abstract_model, concrete_hardware

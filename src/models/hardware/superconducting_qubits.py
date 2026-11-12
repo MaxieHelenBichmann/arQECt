@@ -28,7 +28,7 @@ class SuperconductingQubitsHardwareEvents:
     virtual_swap: list[tuple[HardwareEventLocation, HardwareEventLocation]] = field(default_factory=list)
 
 class SuperconductingQubitsModel(GateProcessor):
-    def __init__(self, number_of_qubits: int, gate_durations: dict[GateKind, float], topology: dict[int, int], noise_model: NoiseModel | None = None, seed: int = 42):
+    def __init__(self, number_of_qubits: int, gate_durations: dict[GateKind, float], topology: dict[int, int], native_gates: set[stim.CircuitInstruction], noise_model: NoiseModel | None = None, seed: int = 42):
         if number_of_qubits < 1:
             raise ValueError("Number of qubits must be at least 1.")
         if not all(degree > 0 and count >= 0 for degree, count in topology.items()):
@@ -42,6 +42,7 @@ class SuperconductingQubitsModel(GateProcessor):
         self.gate_durations: dict[GateKind, float] = gate_durations # needed for idle noise
         self.topology: dict[int, int] = topology  # degree -> max number of qubits with that degree
         self.noise_model: NoiseModel = noise_model if noise_model is not None else NoiseModel.empty()
+        self.native_gates : set[stim.CircuitInstruction] = native_gates
         self._rng: random.Random = random.Random(seed)
 
         self.hardware_events: SuperconductingQubitsHardwareEvents = SuperconductingQubitsHardwareEvents()
