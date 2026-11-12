@@ -9,7 +9,7 @@ from src.models.hardware.neutral_atoms import NeutralAtomsModel, NeutralAtomsHar
 from src.models.noise.noise import NoiseModel
 
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
-NATIVE_GATES: set[stim.CircuitInstruction] = {stim.CircuitInstruction(name, []) for name in ("CX", "H", "S", "M", "R")}
+NATIVE_GATES: set[str] = {"CX", "H", "S", "M", "R"}
 STEANE_MEASURED = STEANE + stim.Circuit("M 0 1 2 3 4 5 6")
 
 NO_EVENTS = {f.name: 0 for f in dataclasses.fields(NeutralAtomsHardwareEvents)}

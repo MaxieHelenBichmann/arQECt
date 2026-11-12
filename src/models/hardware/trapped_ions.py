@@ -27,7 +27,7 @@ class TrappedIonsHardwareEvents:
 
 
 class TrappedIonsModel(GateProcessor):
-    def __init__(self, interaction_zone_capacity: int, nr_interaction_sites: int, native_gates: set[stim.CircuitInstruction], noise_model: NoiseModel | None = None, seed: int = 42):
+    def __init__(self, interaction_zone_capacity: int, nr_interaction_sites: int, native_gates: set[str], noise_model: NoiseModel | None = None, seed: int = 42):
         if interaction_zone_capacity < 2:
             raise ValueError("Interaction zone capacity must be at least 2.")
         if nr_interaction_sites < 1:
@@ -36,7 +36,7 @@ class TrappedIonsModel(GateProcessor):
         self.interaction_zone_capacity: int = interaction_zone_capacity 
         self.nr_interaction_sites: int = nr_interaction_sites
         self.noise_model: NoiseModel = noise_model if noise_model is not None else NoiseModel.empty()
-        self.native_gates : set[stim.CircuitInstruction] = native_gates
+        self.native_gates : set[str] = native_gates
         self._rng: random.Random = random.Random(seed)
 
         self.hardware_events: TrappedIonsHardwareEvents = TrappedIonsHardwareEvents()

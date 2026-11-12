@@ -8,7 +8,7 @@ from src.models.hardware.trapped_ions import TrappedIonsModel
 from src.models.noise.noise import NoiseModel
 
 STEANE = stim.Circuit((pathlib.Path(__file__).parents[2] / "data/circuits/steane_example.stim").read_text())
-NATIVE_GATES: set[stim.CircuitInstruction] = {stim.CircuitInstruction(name, []) for name in ("CX", "H", "S", "M", "R")}
+NATIVE_GATES: set[str] = {"CX", "H", "S", "M", "R"}
 
 
 def make_noise_model(

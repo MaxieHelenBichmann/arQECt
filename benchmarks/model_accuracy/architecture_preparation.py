@@ -5,7 +5,6 @@ import math
 from collections import Counter
 
 import networkx as nx
-import stim
 
 from src.models.hardware import ( TrappedIonsModel, NeutralAtomsModel, SuperconductingQubitsModel)
 from mqt.ionshuttler.linear import Architecture as TIArchitecture
@@ -14,10 +13,10 @@ from mqt.qmap.na.zoned import ZonedNeutralAtomArchitecture
 
 HardwareArchitecture = TIArchitecture | SCArchitecture | ZonedNeutralAtomArchitecture 
 
-# native gate sets (target-less stim instructions), matching the 1-to-1 transpilation in compilation.py
-TI_NATIVE_GATES: set[stim.CircuitInstruction] = {stim.CircuitInstruction(name, []) for name in ("SQRT_XX", "SQRT_X", "SQRT_Y", "M", "R")}
-NA_NATIVE_GATES: set[stim.CircuitInstruction] = {stim.CircuitInstruction(name, []) for name in ("CZ", "H", "S", "M", "R")}
-SC_NATIVE_GATES: set[stim.CircuitInstruction] = {stim.CircuitInstruction(name, []) for name in ("CX", "H", "S", "M", "R")}
+# native gate sets (canonical stim gate names), matching the 1-to-1 transpilation in compilation.py
+TI_NATIVE_GATES: set[str] = {"SQRT_XX", "SQRT_X", "SQRT_Y", "M", "R"}
+NA_NATIVE_GATES: set[str] = {"CZ", "H", "S", "M", "R"}
+SC_NATIVE_GATES: set[str] = {"CX", "H", "S", "M", "R"}
 
 def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsModel, TIArchitecture | dict]:
     """Construct a trapped ion architecture as the abstract model and the concrete MQT IonShuttler hardware.
