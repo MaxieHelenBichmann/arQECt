@@ -22,6 +22,26 @@ class DependencyDAGAnalyzer(MetricExtractor):
 
     def analyze(self) -> dict[str, object]:
         result : dict[str, object] = {}
+
+        # parallelizability
+        result["critical_path_depth"] = self.dag.depth
+        result["2q_depth"] = self._2q_depth()
+        result["critical_path_duration"] = self._critical_path_duration()
+        result["parallelism_saturation"] = self._parallelism_saturation()
+        result["capacity_constrained_depth_bound"] = self._2q_depth()
+        result["min_idle_steps"] = self._min_idle_steps()
+
+        # scheduling choices
+        result["average_scheduling_slack"] = self._average_scheduling_slack()
+        result["average_weighted_scheduling_slack"] = self._average_weighted_scheduling_slack()
+        result["no_slack_fraction"] = self._no_slack_fraction()
+        result["min_scheduling_window_congestion"] = self._min_scheduling_window_congestion()
+        result["max_scheduling_window_congestion"] = self._max_scheduling_window_congestion()
+
+        # layered resource usage
+        result["average_asap_qubit_reuse"] = self._average_asap_qubit_reuse()
+        result["average_alap_qubit_reuse"] = self._average_alap_qubit_reuse()
+        result["average_asap_qubit_interaction"] = self._average_asap_qubit_interaction()
         return result
 
     def _2q_depth(self) -> int:
