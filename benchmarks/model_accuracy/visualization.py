@@ -25,7 +25,7 @@ SURFACE, TEXT, TEXT_SECONDARY, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#898781
 GRID, BASELINE, SERIES, FIT, REFERENCE = "#e1e0d9", "#c3c2b7", "#2a78d6", "#0d366b", "#e34948"
 PER_GATE_COLORS = ["#13917f", "#86a01b"]  # per-gate model per compiler: cool teal-green, warm olive-green
 RING_SIZE, RING_WIDTH = 40, 1.4
-# one color ramp (shade = qubits in circuit), color and marker per compiler, assigned in compiler name order
+# one color ramp (shade = qubits in circuit), color and marker per compiler, with QMAP first (blue)
 COMPILER_CMAPS = [
     LinearSegmentedColormap.from_list(
         "qubits",
@@ -54,7 +54,6 @@ ALIGNMENT_GAP = 2.0
 TI_IZ_CHANGES = ("interaction_zone_entry", "interaction_zone_eviction")
 TI_ION_MOVES = ("shuttles", "swaps")  # swaps count once per participating ion
 NA_ZONE_CHANGES = ("storage_entanglement", "storage_readout", "entanglement_readout", "inter_entanglement")
-NA_COMPARABLE_ZONE_CHANGES = ("storage_entanglement", "inter_entanglement")  # compiler has no readout zone
 
 
 def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = None) -> None:
@@ -82,8 +81,8 @@ def visualize(platform: list[str], results_dir: Path, max_qubits: int | None = N
 
 
 def compiler_groups(items: list, compiler_of) -> list[tuple[str, int, list]]:
-    """Split items by compiler: (compiler, index for its color / marker, items), in compiler name order."""
-    compilers = sorted({compiler_of(item) for item in items})
+    """Split items by compiler: (compiler, index for its color / marker, items), with QMAP first."""
+    compilers = sorted({compiler_of(item) for item in items}, key=lambda compiler: (compiler != "QMAP", compiler))
     return [(compiler, g, [item for item in items if compiler_of(item) == compiler]) for g, compiler in enumerate(compilers)]
 
 
@@ -92,7 +91,10 @@ def circuits_subtitle(circuits: list[list[dict]]) -> str:
     for rows in circuits:
         wall_clock_s = {row["source"]: float(row["value"]) for row in rows if row["metric"] == "wall_clock_s"}
         speedups[rows[0]["compiler"]].append(wall_clock_s["compiled"] / wall_clock_s["abstract"])
-    means = {compiler: float(np.mean(s)) for compiler, s in sorted(speedups.items())}
+    means = {
+        compiler: float(np.mean(s))
+        for compiler, s in sorted(speedups.items(), key=lambda item: (item[0] != "QMAP", item[0]))
+    }
     # plain numbers, no scientific notation: 3 significant digits below 100, whole numbers with thousands separators above
     speedup = ", ".join(f"{c} {m:,.0f}×" if m >= 100 else f"{c} {m:.3g}×" for c, m in means.items()) or "n/a"
     circuit_names = {rows[0]["circuit"] for rows in circuits}
@@ -288,35 +290,12 @@ def visualize_aggregated(platform: str, config: str, circuits: list[list[dict]],
             ),
         ]
     elif platform == "NA":
-        comparable = {
-            "storage_entanglement": ("storage_entanglement",),
-            "inter_entanglement": ("inter_entanglement",),
-            "zone_changes": NA_COMPARABLE_ZONE_CHANGES,
-        }
-        metrics = {**comparable, "all_zone_changes": NA_ZONE_CHANGES}
-        compiled_metrics = {**comparable, "atom_moves": ("transports",)}
+        metrics = {"zone_changes": NA_ZONE_CHANGES}
+        compiled_metrics = {**metrics, "atom_moves": ("transports",)}
         plots = [
             (
-                "storage_entanglement",
-                "storage ↔ entanglement zone changes",
-                "storage_entanglement",
-                "storage_entanglement",
-                "abstract storage ↔ EZ changes",
-                "compiled storage ↔ EZ changes",
-                True,
-            ),
-            (
-                "inter_entanglement",
-                "entanglement site changes",
-                "inter_entanglement",
-                "inter_entanglement",
-                "abstract EZ site changes",
-                "compiled EZ site changes",
-                True,
-            ),
-            (
                 "zone_changes",
-                "zone changes (storage ↔ EZ + EZ site)",
+                "zone changes",
                 "zone_changes",
                 "zone_changes",
                 "abstract zone changes",
@@ -326,7 +305,7 @@ def visualize_aggregated(platform: str, config: str, circuits: list[list[dict]],
             (
                 "zone_changes_vs_atom_moves",
                 "zone changes vs atom moves",
-                "all_zone_changes",
+                "zone_changes",
                 "atom_moves",
                 "abstract zone changes (incl. readout)",
                 "compiled atom transports",
@@ -539,6 +518,8 @@ def visualize_aggregated(platform: str, config: str, circuits: list[list[dict]],
                 f" the fit holding {BAND_SHARE:.0%} of the circuits",
                 "/anchor = counts divided by the anchors of the circuit",
             )
+        if platform == "NA":
+            notes += ("Totals include readout transitions; compiler adapters do not model readout transport.",)
         qubit_colorbars(fig, ax, mappables)
         compilers = ", ".join(compiler for compiler, *_ in groups)
         style(
@@ -607,7 +588,7 @@ def visualize_distribution(platform: str, config: str, circuits: list[list[dict]
         movement = TI_ION_MOVES
         event, event_key, move = "IZ change", "iz_changes", "ion moves"
     elif platform == "NA":
-        comparable, proxy = NA_COMPARABLE_ZONE_CHANGES, NA_ZONE_CHANGES
+        comparable = proxy = NA_ZONE_CHANGES
         movement = ("transports",)
         event, event_key, move = "zone change", "zone_changes", "atom transports"
     else:

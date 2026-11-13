@@ -2,7 +2,6 @@
 
 import contextlib
 import io
-import json
 import math
 import multiprocessing
 import os
@@ -17,8 +16,14 @@ from mqt.core.ir import QuantumComputation
 from qiskit import QuantumCircuit, qasm2
 from qiskit.transpiler import CouplingMap, PassManager
 from qiskit.transpiler.passes import SabreLayout
-from zac.zac import ZAC
-from zac.ds.architecture import Architecture as ZACArchitecture
+from bloqade import squin
+from bloqade.lanes.bytecode.encoding import LocationAddress
+from bloqade.lanes.dialects import place, move
+from bloqade.lanes.transform import PhysicalNativeToPlace, PlaceToMove
+from bloqade.lanes.passes import SequentialPlacePass
+from bloqade.lanes.heuristics.logical.layout import LogicalLayoutHeuristic
+from bloqade.lanes.heuristics.physical.movement import make_physical_placement_strategy
+from bloqade.lanes.analysis.atom import AtomInterpreter
 
 from mqt.ionshuttler.linear import (
     Architecture as TIArchitecture, LinearCompiler, CompilationStatus, LinearCompilerConfig, SearchConfig
@@ -29,7 +34,6 @@ from mqt.ionshuttler.multi_shuttler.outside import shuttle as ms_shuttle
 
 from mqt.qmap.na.zoned import (
     ZonedNeutralAtomArchitecture,
-    RoutingAgnosticCompiler,
     RoutingAwareCompiler,
 )
 
@@ -178,9 +182,8 @@ def run_ti_mqt_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, 
     return hardware_events, details
 
 
-def run_na_mqt_compiler(hardware: dict, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[NeutralAtomsHardwareEvents, dict]:
+def run_na_mqt_compiler(hardware: ZonedNeutralAtomArchitecture, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[NeutralAtomsHardwareEvents, dict]:
     """Run the neutral atom compiler (MQT QMAP zoned, routing-aware) on the given circuit and given hardware architecture."""
-    hardware = ZonedNeutralAtomArchitecture.from_json_string(json.dumps(hardware))
 
     # 1.) 1-to-1 transpilation (one stim target group -> one native op) and format change (stim -> mqt)
     qc = QuantumComputation(circuit.num_qubits)
@@ -300,93 +303,107 @@ def run_na_mqt_compiler(hardware: dict, circuit: stim.Circuit, max_compile_time:
     return hardware_events, details
 
 
-def run_na_zac_compiler(hardware: dict, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[NeutralAtomsHardwareEvents, dict]:
-    """Run the second neutral atom compiler (ZAC, reuse-aware zoned compiler) on the given circuit and given hardware architecture."""
-    # 1.) 1-to-1 transpilation (one stim target group -> one native op) and format change (stim -> ZAC gate lists):
-    #     2-qubit gates in order, every 1-qubit gate attached to the last 2-qubit gate of its atom (-1: none yet), as ZAC's own parser does
-    #     (its parser re-optimizes the circuit and needs qiskit internals, so it is bypassed)
-    #     ZAC makes a second 1-qubit gate of an atom after the same 2-qubit gate depend on itself (KeyError in its timing), so
-    #     they are merged into one gate per atom there, named after its anchors ("rz<n>", "h" for none); ZAC runs them all at once anyway
-    two_qubit_gates: list[list[int]] = []
-    one_qubit_anchors: defaultdict[int, Counter[int]] = defaultdict(Counter)  # 2-qubit gate -> atom -> anchors among its 1-qubit gates after it
-    last_gate: defaultdict[int, int] = defaultdict(lambda: -1)  # atom -> index of its last 2-qubit gate
+def run_na_bloqade_compiler(hardware: dict, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[NeutralAtomsHardwareEvents, dict]:
+    """Run Bloqade Lanes on the same trap geometry and CZ sites, using fixed row/column transport lanes (prepared in architecture_preparation.py)."""
+    # 1.) 1-to-1 transpilation (one stim target group -> one native op), as for QMAP
+    gates = []
     for op in circuit:
         data = stim.gate_data(op.name)
         for group in op.target_groups():
             atoms = [t.value for t in group]
-            if data.is_two_qubit_gate:
-                last_gate[atoms[0]] = last_gate[atoms[1]] = len(two_qubit_gates)
-                two_qubit_gates.append(sorted(atoms))
-            elif data.produces_measurements or data.is_reset:  # MR counts as one anchor, as in NeutralAtomsModel
-                one_qubit_anchors[last_gate[atoms[0]]][atoms[0]] += 1
-            else:
-                one_qubit_anchors[last_gate[atoms[0]]][atoms[0]] += 0
-    one_qubit_gates = {gate: [(f"rz{n}" if n else "h", atom) for atom, n in anchors.items()] for gate, anchors in one_qubit_anchors.items()}
+            kind = 2 if data.is_two_qubit_gate else 3 if data.produces_measurements or data.is_reset else 1
+            gates.append((kind, atoms[0], atoms[-1]))
+    gates = tuple(gates)
+    num_qubits = circuit.num_qubits
 
-    # ZAC reads the same architecture spec as MQT QMAP, except for some key names and an overall `arch_range`
-    def zac_keys(item: dict) -> dict:
-        return {("site_seperation" if key == "site_separation" else key): value for key, value in item.items()}
-    zones = {kind: [{**zone, "slms": [zac_keys(slm) for slm in zone["slms"]]} for zone in hardware[kind]]
-             for kind in ("storage_zones", "entanglement_zones")}
-    corners = [(zone["offset"][0] + dx, zone["offset"][1] + dy) for zone in zones["storage_zones"] + zones["entanglement_zones"]
-               for dx, dy in [(0, 0), zone["dimension"]]]
-    spec = {**hardware, **zones, "aods": [zac_keys(aod) for aod in hardware["aods"]],
-            "operation_duration": {"rydberg": hardware["operation_duration"]["rydberg_gate"],
-                                   "1qGate": hardware["operation_duration"]["single_qubit_gate"],
-                                   "atom_transfer": hardware["operation_duration"]["atom_transfer"]},
-            "arch_range": [[min(x for x, _ in corners), min(y for _, y in corners)], [max(x for x, _ in corners), max(y for _, y in corners)]]}
-
-    # 2.) compile (default ZAC settings: ASAP scheduling, SA initial placement, reuse-aware dynamic placement)
-    def compile_in_child(connection) -> None: # enable compilation timeout
+    # 2.) compile (all atoms start in storage), then collect a plain instruction trace for replay
+    architecture, positions, sites = hardware["architecture"], hardware["positions"], hardware["sites"]
+    def compile_in_child(connection) -> None:
         try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                architecture = ZACArchitecture(spec)
-                architecture.preprocessing()
-                compiler = ZAC()
-                compiler.parse_setting({"dependency": True, "scheduling": "asap", "routing_strategy": "maximalis_sort", "trivial_placement": False,
-                                        "dynamic_placement": True, "reuse": True, "use_window": True, "window_size": 1000, "use_verifier": False})
-                compiler.set_architecture(architecture)
-                compiler.n_q, compiler.g_q, compiler.n_g = circuit.num_qubits, two_qubit_gates, len(two_qubit_gates)
-                compiler.dict_g_1q_parent = {-1: [], **one_qubit_gates}
-                connection.send(compiler.solve(save_file=False)["instructions"])
+            @squin.kernel
+            def program():
+                atoms = squin.qalloc(num_qubits)
+                for gate in gates:
+                    if gate[0] == 2:
+                        squin.cz(atoms[gate[1]], atoms[gate[2]])
+                    elif gate[0] == 3:
+                        squin.rz(1.0, atoms[gate[1]])  # measurement/reset anchor, as in QMAP
+                    else:
+                        squin.ry(1.0, atoms[gate[1]])  # one native R gate; reserves Rz for anchors
+                return squin.broadcast.measure(atoms)  # required terminal measurement, excluded from the proxy
+
+            placed = PhysicalNativeToPlace(arch_spec=architecture).emit(program, no_raise=False)
+            for atom, statement in enumerate(s for s in placed.callable_region.walk() if isinstance(s, place.NewPinnedQubit)):
+                statement.location_address = LocationAddress(atom, 0, 0)
+            if num_qubits > hardware["storage_sites"]:
+                raise ValueError("The storage zone cannot hold all atoms.")
+            SequentialPlacePass(placed.dialects, no_raise=False)(placed)
+            placement_strategy = make_physical_placement_strategy(arch_spec=architecture, search_budget=30)
+            placement_strategy.inner.restarts = 1  # one deterministic routing search per stage
+            compiled = PlaceToMove(
+                layout_heuristic=LogicalLayoutHeuristic(arch_spec=architecture),
+                placement_strategy=placement_strategy,
+            ).emit(placed, no_raise=False)
+            frame, _ = AtomInterpreter(compiled.dialects, arch_spec=architecture).run(compiled)
+            instructions = []
+            for statement in compiled.callable_region.walk():
+                if isinstance(statement, move.Move):
+                    before = frame.get(statement.current_state).data.qubit_to_locations
+                    after = frame.get(statement.result).data.qubit_to_locations
+                    instructions.append(("move", [(atom, src.word_id, after[atom].word_id)
+                                                   for atom, src in before.items() if src != after[atom]]))
+                elif isinstance(statement, move.CZ):
+                    controls, targets, _ = frame.get(statement.result).data.get_qubit_pairing(statement.zone_address, architecture)
+                    instructions.append(("anchor", [*controls, *targets]))
+                elif isinstance(statement, (move.LocalRz, move.GlobalRz)):
+                    state = frame.get(statement.result).data
+                    atoms = list(state.qubit_to_locations) if isinstance(statement, move.GlobalRz) else [
+                        state.locations_to_qubit[loc] for loc in statement.location_addresses]
+                    instructions.append(("anchor", atoms))
+            connection.send(instructions)
         except Exception as error:
-            connection.send(error)
+            connection.send(RuntimeError(str(error)))
     receiver, sender = multiprocessing.Pipe(duplex=False)
     child = multiprocessing.get_context("fork").Process(target=compile_in_child, args=(sender,))
     start = time.perf_counter()
     child.start()
+    sender.close()
     if not receiver.poll(max_compile_time):
         child.kill()
-        raise TimeoutError(f"Neutral atom compilation did not succeed: TIMEOUT after {max_compile_time}s")
-    instructions = receiver.recv()
+        child.join()
+        receiver.close()
+        raise TimeoutError(f"Bloqade compilation did not succeed: TIMEOUT after {max_compile_time}s")
+    try:
+        instructions = receiver.recv()
+    except EOFError as error:
+        raise RuntimeError("Bloqade compilation exited without a result.") from error
+    finally:
+        receiver.close()
+        child.join()
     wall_clock_s = time.perf_counter() - start
-    child.join()
     if isinstance(instructions, Exception):
-        raise RuntimeError(f"Neutral atom compilation did not succeed: {instructions!r}")
+        raise RuntimeError(f"Bloqade compilation did not succeed: {instructions}")
 
-    # 3.) extract events by replaying schedule (locations are (slm, row, column), the two SLMs of an entanglement zone form its CZ sites)
-    architecture = ZACArchitecture(spec)
-    def site_of(location: list[int]) -> tuple[int, int, int] | None:
-        if location[0] in architecture.storage_zone:
-            return None
-        return architecture.dict_SLM[location[0]].entanglement_id, location[1], location[2]
-
+    # 3.) extract the same hardware events and movement details by replaying the schedule
     hardware_events = NeutralAtomsHardwareEvents()
-    qubit_steps: defaultdict[int, int] = defaultdict(int)  # atom -> number of completed anchor operations
-    transports: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> number of transports (pick-up, move, drop-off) of that atom there
-    zone_changes: Counter[tuple[int, int]] = Counter()  # ... of which between storage and an entanglement zone
-    site_changes: Counter[tuple[int, int]] = Counter()  # ... of which between two different CZ sites (ZAC always goes through storage, so none)
-    storage_moves: Counter[tuple[int, int]] = Counter()  # ... of which within the storage zone
-    move_distance: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> distance (um) the atom travelled there
+    qubit_steps: defaultdict[int, int] = defaultdict(int)
+    transports: Counter[tuple[int, int]] = Counter()
+    zone_changes: Counter[tuple[int, int]] = Counter()
+    site_changes: Counter[tuple[int, int]] = Counter()
+    storage_moves: Counter[tuple[int, int]] = Counter()
+    move_distance: Counter[tuple[int, int]] = Counter()
     rearrangement_jobs = 0
-    for instruction in instructions:  # in a valid execution order (rearrangement jobs, rydberg, 1-qubit gates, rearrangement jobs, ...)
-        if instruction["type"] == "rearrangeJob":
+    for op, targets in instructions:
+        if op == "anchor":
+            for atom in targets:
+                qubit_steps[atom] += 1
+        else:
             rearrangement_jobs += 1
-            for (atom, *begin), (_, *end) in zip(instruction["begin_locs"], instruction["end_locs"]):
-                src, dst = site_of(begin), site_of(end)
+            for atom, begin, end in targets:
+                src, dst = sites.get(begin), sites.get(end)
                 anchor = (atom, qubit_steps[atom])
                 transports[anchor] += 1
-                move_distance[anchor] += math.dist(architecture.exact_SLM_location_tuple(begin), architecture.exact_SLM_location_tuple(end))
+                move_distance[anchor] += math.dist(positions[begin], positions[end])
                 if (src is None) != (dst is None):
                     zone_changes[anchor] += 1
                     hardware_events.storage_entanglement.append(anchor)
@@ -395,32 +412,23 @@ def run_na_zac_compiler(hardware: dict, circuit: stim.Circuit, max_compile_time:
                 elif src != dst:
                     site_changes[anchor] += 1
                     hardware_events.inter_entanglement.append(anchor)
-        elif instruction["type"] == "rydberg":
-            for gate in instruction["gates"]:
-                qubit_steps[gate["q0"]] += 1
-                qubit_steps[gate["q1"]] += 1
-        elif instruction["type"] == "1qGate":
-            for gate in instruction["gates"]:
-                if gate["name"].startswith("rz"):  # merged measurement / reset markers, "rz<number of anchors>"
-                    qubit_steps[gate["q"]] += int(gate["name"][2:])
 
     expected_steps = Counter(t.value for op in circuit for group in op.target_groups() for t in group
                              if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
                              or stim.gate_data(op.name).is_reset)
     if {qubit: steps for qubit, steps in qubit_steps.items() if steps} != dict(expected_steps):
-        raise RuntimeError("Neutral atom schedule replay does not reproduce the anchor operations of the circuit.")
+        raise RuntimeError("Bloqade schedule replay does not reproduce the anchor operations of the circuit.")
 
     details = {
-        "transports": dict(sorted(transports.items())),  # (qubit, completed anchors) -> nr of atom transports (pick-up, move, drop-off) there
-        "zone_changes": dict(sorted(zone_changes.items())),  # ... of which storage <-> entanglement zone
-        "entanglement_site_changes": dict(sorted(site_changes.items())),  # ... of which between different CZ sites
-        "storage_moves": dict(sorted(storage_moves.items())),  # ... of which within the storage zone (rearrangements)
-        "move_distance": dict(sorted(move_distance.items())),  # (qubit, completed anchors) -> straight-line distance (um) the atom travelled there
-        "rearrangement_jobs": rearrangement_jobs,  # AOD jobs (all atoms moved together count once)
+        "transports": dict(sorted(transports.items())),
+        "zone_changes": dict(sorted(zone_changes.items())),
+        "entanglement_site_changes": dict(sorted(site_changes.items())),
+        "storage_moves": dict(sorted(storage_moves.items())),
+        "move_distance": dict(sorted(move_distance.items())),
+        "rearrangement_jobs": rearrangement_jobs,
         "wall_clock_s": wall_clock_s,
     }
     return hardware_events, details
-
 
 
 def run_sc_mqt_compiler(hardware: SCArchitecture, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[SuperconductingQubitsHardwareEvents, dict]:
@@ -496,7 +504,7 @@ def run_sc_mqt_compiler(hardware: SCArchitecture, circuit: stim.Circuit, max_com
     return hardware_events, details
 
 
-def run_sc_sabre_compiler(hardware: SCArchitecture, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[SuperconductingQubitsHardwareEvents, dict]:
+def run_sc_sabre_compiler(hardware: CouplingMap, circuit: stim.Circuit, max_compile_time: float = 600.0) -> tuple[SuperconductingQubitsHardwareEvents, dict]:
     """Run the second superconducting qubit compiler (Qiskit SABRE layout and routing) on the given circuit and given hardware architecture.
     SABRE has no time limit, so `max_compile_time` is not enforced."""
     # 1.) 1-to-1 transpilation (one stim target group -> one native op) and format change (stim -> qiskit)
@@ -513,7 +521,7 @@ def run_sc_sabre_compiler(hardware: SCArchitecture, circuit: stim.Circuit, max_c
                 qc.h(*qubits)
 
     # 2.) compile (only layout + routing, no gate optimization or basis translation, so swaps stay explicit; fixed trials for reproducibility)
-    sabre = SabreLayout(CouplingMap(sorted(list(edge) for edge in hardware.coupling_map)), seed=0, max_iterations=4, swap_trials=20, layout_trials=20)
+    sabre = SabreLayout(hardware, seed=0, max_iterations=4, swap_trials=20, layout_trials=20)
     start = time.perf_counter()
     mapped = PassManager([sabre]).run(qc)
     wall_clock_s = time.perf_counter() - start
@@ -531,7 +539,7 @@ def run_sc_sabre_compiler(hardware: SCArchitecture, circuit: stim.Circuit, max_c
             swaps.update((qubit, qubit_steps[qubit]) for qubit in qubits)
             layout[physicals[0]], layout[physicals[1]] = qubits[1], qubits[0]
         elif instruction.operation.name == "cx":
-            assert tuple(physicals) in hardware.coupling_map, "mapped CX on uncoupled qubits"
+            assert hardware.graph.has_edge(*physicals), "mapped CX on uncoupled qubits"
             qubit_steps[qubits[0]] += 1
             qubit_steps[qubits[1]] += 1
         elif instruction.operation.name == "rz":  # measurement / reset marker

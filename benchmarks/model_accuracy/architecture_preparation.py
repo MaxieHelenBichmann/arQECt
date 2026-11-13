@@ -1,23 +1,28 @@
 """Constructs specific hardware."""
 
+import json
 import math
-from collections import Counter
+from collections import Counter, defaultdict
 
 import networkx as nx
+from qiskit.transpiler import CouplingMap
+from bloqade.lanes.arch import ArchSpec as BloqadeArchitecture
+from bloqade.lanes.bytecode import ArchSpec as BloqadeBytecodeArchitecture
 
 from src.models.hardware import ( TrappedIonsModel, NeutralAtomsModel, SuperconductingQubitsModel)
 from mqt.ionshuttler.linear import Architecture as TIArchitecture
+from mqt.qmap.na.zoned import ZonedNeutralAtomArchitecture
 from mqt.qmap.sc import Architecture as SCArchitecture
 
-HardwareArchitecture = TIArchitecture | SCArchitecture | dict
+HardwareArchitecture = TIArchitecture | ZonedNeutralAtomArchitecture | SCArchitecture | CouplingMap | dict
 
 # native gate sets (canonical stim gate names), matching the 1-to-1 transpilation in compilation.py
 TI_NATIVE_GATES: set[str] = {"SQRT_XX", "SQRT_X", "SQRT_Y", "M", "R"}
 NA_NATIVE_GATES: set[str] = {"CZ", "H", "S", "M", "R"}
 SC_NATIVE_GATES: set[str] = {"CX", "H", "S", "M", "R"}
 
-def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsModel, TIArchitecture | dict]:
-    """Construct a trapped ion architecture as the abstract model and the concrete MQT IonShuttler hardware.
+def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsModel, dict[str, TIArchitecture | dict]]:
+    """Construct a trapped ion architecture as the abstract model and the concrete hardware per compiler (MQT IonShuttler).
 
     parameters: `topology` ("linear" | "ring" | "grid"), `nr_zones`
       - linear: `zone_capacity`, optional `storage_slack` (1)
@@ -46,11 +51,11 @@ def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsM
         raise ValueError(f"Unsupported trapped ion architecture {parameters['topology']!r} (linear, ring, grid).")
 
     abstract_model = TrappedIonsModel(interaction_zone_capacity=capacity, nr_interaction_sites=nr_zones, native_gates=TI_NATIVE_GATES)
-    return abstract_model, concrete_hardware
+    return abstract_model, {"IonShuttler": concrete_hardware}
 
-def prepare_na_hardware(parameters: dict, num_qubits: int) -> tuple[NeutralAtomsModel, dict]:
-    """Construct a zoned neutral atom architecture as the abstract model and the concrete hardware (zoned architecture spec, as JSON dict,
-    read by MQT QMAP (zoned) and ZAC).
+def prepare_na_hardware(parameters: dict, num_qubits: int) -> tuple[NeutralAtomsModel, dict[str, ZonedNeutralAtomArchitecture | dict]]:
+    """Construct a zoned neutral atom architecture as the abstract model and the concrete hardware per compiler: one zoned architecture spec,
+    read by MQT QMAP (zoned) and adapted to fixed transport lanes for Bloqade Lanes (only with one entanglement zone).
 
     parameters: `entanglement_zone_size` fixed n x m grid
     
@@ -81,7 +86,50 @@ def prepare_na_hardware(parameters: dict, num_qubits: int) -> tuple[NeutralAtoms
         "aods": [{"id": 0, "site_separation": 2, "r": parameters.get("aod_size", (100, 100))[0], "c": parameters.get("aod_size", (100, 100))[1]}],
         "rydberg_range": [[[margin - 2, y - 2], [margin + 12 * ez_cols, y + ez_height + 2]] for y in ez_ys],
     }
-    concrete_hardware = spec
+    concrete_hardware = {"QMAP": ZonedNeutralAtomArchitecture.from_json_string(json.dumps(spec))}
+
+    # Bloqade Lanes (0.11.9 supports exactly one entanglement zone): words have equal sizes, so one trap per word, preserving the
+    # coordinates and CZ pairs. Its one compilation region contains storage traps and CZ sites, with no dedicated readout zone.
+    if nr_ezs == 1:
+        positions, pairs, buses = [], [], []
+        storage_sites = 0
+        for zone in spec["storage_zones"] + spec["entanglement_zones"]:
+            grids = []
+            for slm in zone["slms"]:
+                rows, cols = slm["r"], slm["c"]
+                grid = [[len(positions) + r * cols + c for c in range(cols)] for r in range(rows)]
+                grids.append(grid)
+                positions.extend((slm["location"][0] + c * slm["site_separation"][0],
+                                  slm["location"][1] + r * slm["site_separation"][1]) for r in range(rows) for c in range(cols))
+                # Each bus translates a rectangular set of traps within an SLM; lanes can carry atoms in parallel.
+                for dr, dc in [(d, 0) for d in range(1, rows)] + [(0, d) for d in range(1, cols)]:
+                    buses.append({"src": [grid[r][c] for r in range(rows - dr) for c in range(cols - dc)],
+                                  "dst": [grid[r + dr][c + dc] for r in range(rows - dr) for c in range(cols - dc)]})
+            if len(grids) == 2:
+                pairs.extend([a, b] for row_a, row_b in zip(*grids) for a, b in zip(row_a, row_b))
+            else:
+                storage_sites += len(grids[0]) * len(grids[0][0])
+        # Connect neighboring SLMs along shared rows/columns. Bloqade handles routing along these fixed lanes.
+        for axis in (0, 1):
+            lines: defaultdict[float, list] = defaultdict(list)
+            for word, pos in enumerate(positions):
+                lines[pos[axis]].append((pos[1 - axis], word))
+            for line in lines.values():
+                line.sort()
+                buses.extend({"src": [a[1]], "dst": [b[1]]} for a, b in zip(line, line[1:]))
+        xs, ys = sorted({x for x, _ in positions}), sorted({y for _, y in positions})
+        lanes_spec = {"version": "2.0", "words": [{"sites": [[xs.index(x), ys.index(y)]]} for x, y in positions],
+                      "zones": [{"name": "zoned", "grid": {"x_start": xs[0], "y_start": ys[0],
+                                 "x_spacing": [b - a for a, b in zip(xs, xs[1:])], "y_spacing": [b - a for a, b in zip(ys, ys[1:])]},
+                                 "site_buses": [], "word_buses": buses, "words_with_site_buses": [], "sites_with_word_buses": [0],
+                                 "entangling_pairs": pairs}],
+                      "zone_buses": [], "modes": [{"name": "all", "zones": [0], "bitstring_order": []}]}
+        concrete_hardware["Bloqade"] = {
+            "architecture": BloqadeArchitecture(BloqadeBytecodeArchitecture.from_json_validated(json.dumps(lanes_spec))),
+            "positions": positions,  # word -> trap coordinates (um)
+            "sites": {word: min(pair) for pair in pairs for word in pair},  # entanglement zone word -> CZ site
+            "storage_sites": storage_sites,
+        }
 
     readout_rows, readout_cols = parameters["readout_zone_size"]
     abstract_model = NeutralAtomsModel(entanglement_zone_capacity=nr_ezs * ez_rows * ez_cols, readout_zone_capacity=readout_rows * readout_cols,
@@ -90,8 +138,8 @@ def prepare_na_hardware(parameters: dict, num_qubits: int) -> tuple[NeutralAtoms
 
 
 
-def prepare_sc_hardware(parameters: dict, num_qubits: int) -> tuple[SuperconductingQubitsModel, SCArchitecture]:
-    """Construct a superconducting qubit architecture as the abstract model and the concrete MQT QMAP hardware.
+def prepare_sc_hardware(parameters: dict, num_qubits: int) -> tuple[SuperconductingQubitsModel, dict[str, SCArchitecture | CouplingMap]]:
+    """Construct a superconducting qubit architecture as the abstract model and the concrete hardware per compiler (MQT QMAP, Qiskit SABRE).
 
     parameters: `topology` ("square" | "hex" | "heavy_hex" | "octagonal")
     """
@@ -141,7 +189,8 @@ def prepare_sc_hardware(parameters: dict, num_qubits: int) -> tuple[Superconduct
         if best_key is None or key < best_key:
             chip, best_key = graph, key
 
-    concrete_hardware = SCArchitecture(num_qubits, {edge for u, v in chip.edges for edge in [(u, v), (v, u)]})  # bidirectional
+    coupling = {edge for u, v in chip.edges for edge in [(u, v), (v, u)]}  # bidirectional
+    concrete_hardware = {"QMAP": SCArchitecture(num_qubits, coupling), "SABRE": CouplingMap(sorted(list(edge) for edge in coupling))}
     abstract_model = SuperconductingQubitsModel(number_of_qubits=num_qubits, topology=dict(Counter(d for _, d in chip.degree)),
                                                 gate_durations={"SN": 1, "MS": 1, "EN": 1}, native_gates=SC_NATIVE_GATES)
     return abstract_model, concrete_hardware

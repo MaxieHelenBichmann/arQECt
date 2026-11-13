@@ -2,24 +2,21 @@
 name = "arqect"
 version = "0.1.0"
 description = "Hardware-aware analysis and evaluation of quantum error-correction circuits"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
+    "bloqade-lanes==0.11.9",
     "matplotlib==3.11.2",
     "mqt-ionshuttler==0.3.0",
     "mqt-qmap==3.11.0",
     "networkx==3.7",
-    "numpy==2.5.4",
+    "numpy==2.2.6",
     "pyyaml>=6.0.3",
     "qiskit==2.6.2",
     "scipy==1.18.1",
     "stim==1.16.0",
-    "zac",
 ]
-
-[tool.uv.sources]
-zac = { path = "third_party/zac" }  # vendored, see third_party/zac/pyproject.toml
 
 [dependency-groups]
 dev = [

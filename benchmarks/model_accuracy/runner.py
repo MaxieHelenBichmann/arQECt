@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 from src.models.hardware import HardwareModel, HardwareEvents, PlatformTag
 
-from benchmarks.model_accuracy.compilation import (run_ti_mqt_compiler, run_na_mqt_compiler, run_na_zac_compiler, run_sc_mqt_compiler, run_sc_sabre_compiler,
+from benchmarks.model_accuracy.compilation import (run_ti_mqt_compiler, run_na_mqt_compiler, run_na_bloqade_compiler, run_sc_mqt_compiler, run_sc_sabre_compiler,
                                                    run_ti_abstraction, run_na_abstraction, run_sc_abstraction, run_ti_baseline, run_na_baseline,
                                                    run_sc_baseline)
 from benchmarks.model_accuracy.architecture_preparation import prepare_ti_hardware, prepare_na_hardware, prepare_sc_hardware, HardwareArchitecture
@@ -22,7 +22,7 @@ _CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / 
 _CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / "circuits"
 _RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "model_accuracy"
 
-_PREPARE_HARDWARE : dict[PlatformTag, Callable[[dict, int], tuple[HardwareModel, HardwareArchitecture | dict]]] = {
+_PREPARE_HARDWARE : dict[PlatformTag, Callable[[dict, int], tuple[HardwareModel, dict[str, HardwareArchitecture]]]] = {
     "TI": prepare_ti_hardware,
     "NA": prepare_na_hardware,
     "SC": prepare_sc_hardware
@@ -43,7 +43,7 @@ _RUN_ABSTRACTION : dict[PlatformTag, Callable[[HardwareModel,  stim.Circuit], tu
 # independent compilers per platform (name -> compiler), each compared to the abstract model on its own
 _RUN_COMPILER : dict[PlatformTag, dict[str, Callable[[HardwareArchitecture | dict, stim.Circuit, float], tuple[HardwareModel, HardwareEvents | dict]]]] = {
     "TI": {"IonShuttler": run_ti_mqt_compiler},
-    "NA": {"QMAP": run_na_mqt_compiler, "ZAC": run_na_zac_compiler},
+    "NA": {"QMAP": run_na_mqt_compiler, "Bloqade": run_na_bloqade_compiler},
     "SC": {"QMAP": run_sc_mqt_compiler, "SABRE": run_sc_sabre_compiler}
 }
 
@@ -93,7 +93,11 @@ def run(platforms: list[PlatformTag] | None = None, max_qubits: int | None = Non
                                     if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
                                     or stim.gate_data(op.name).is_reset)
                 
-                abstract_hardware, concrete_hardware = _PREPARE_HARDWARE[config["platform"]](parameters=config["architecture"], num_qubits=circuit.num_qubits)
+                abstract_hardware, concrete_hardwares = _PREPARE_HARDWARE[config["platform"]](parameters=config["architecture"], num_qubits=circuit.num_qubits)
+                if compiler not in concrete_hardwares:
+                    print(f"Skipped {config['name']} / {circuit_name} / {compiler}: architecture not supported by {compiler}")
+                    continue
+                concrete_hardware = concrete_hardwares[compiler]
 
                 print(f"[{config["platform"]}] Running baseline execution of {circuit_name} on ({config["name"]})...")
                 baseline_hardware_events, baseline_details = _RUN_BASELINE[config["platform"]](circuit)
