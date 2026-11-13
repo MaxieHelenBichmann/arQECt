@@ -80,29 +80,36 @@ def run(platforms: list[PlatformTag] | None = None, max_qubits: int | None = Non
             configs.append(config)
     print(f"Collected {len(configs)} hardware configurations...")
 
-    # run baseline, my abstract execution, and compilation for each hardware config, circuit and compiler
-    for config in configs:  
+    # run baseline and my abstract execution once for each hardware config and circuit, and the compilation for each compiler
+    for config in configs:
         for circuit_name, circuit in circuits.items():
+            compilers = {}
             for compiler, run_compiler in _RUN_COMPILER[config["platform"]].items():
                 raw_file = _RESULTS_DIR / config["platform"].lower() / "raw" / f"{config['name']}__{circuit_name}__{compiler}.csv"
                 if append and raw_file.exists():
                     print(f"[{config["platform"]}] Skipping {circuit_name} on ({config["name"]}) with {compiler}: raw result already exists")
-                    continue
+                else:
+                    compilers[compiler] = (run_compiler, raw_file)
+            if not compilers:
+                continue
 
-                anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
-                                    if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
-                                    or stim.gate_data(op.name).is_reset)
-                
-                abstract_hardware, concrete_hardwares = _PREPARE_HARDWARE[config["platform"]](parameters=config["architecture"], num_qubits=circuit.num_qubits)
+            anchors = Counter(t.value for op in circuit for group in op.target_groups() for t in group
+                                if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
+                                or stim.gate_data(op.name).is_reset)
+
+            abstract_hardware, concrete_hardwares = _PREPARE_HARDWARE[config["platform"]](parameters=config["architecture"], num_qubits=circuit.num_qubits)
+
+            print(f"[{config["platform"]}] Running baseline execution of {circuit_name} on ({config["name"]})...")
+            baseline_hardware_events, baseline_details = _RUN_BASELINE[config["platform"]](circuit)
+            print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
+            abstract_hardware_events, abstraction_details = _RUN_ABSTRACTION[config["platform"]](hardware=abstract_hardware, circuit=circuit)
+
+            for compiler, (run_compiler, raw_file) in compilers.items():
                 if compiler not in concrete_hardwares:
                     print(f"Skipped {config['name']} / {circuit_name} / {compiler}: architecture not supported by {compiler}")
                     continue
                 concrete_hardware = concrete_hardwares[compiler]
 
-                print(f"[{config["platform"]}] Running baseline execution of {circuit_name} on ({config["name"]})...")
-                baseline_hardware_events, baseline_details = _RUN_BASELINE[config["platform"]](circuit)
-                print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
-                abstract_hardware_events, abstraction_details = _RUN_ABSTRACTION[config["platform"]](hardware=abstract_hardware, circuit=circuit)
                 print(f"[{config["platform"]}] Running compilation of        {circuit_name} on ({config["name"]}) with {compiler}...")
                 try:
                     concrete_hardware_events, compiler_details = run_compiler(hardware=concrete_hardware, circuit=circuit, max_compile_time=max_compile_time)
