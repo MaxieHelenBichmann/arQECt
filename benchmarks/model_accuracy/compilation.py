@@ -338,8 +338,8 @@ def run_na_bloqade_compiler(hardware: dict, circuit: stim.Circuit, max_compile_t
             if num_qubits > hardware["storage_sites"]:
                 raise ValueError("The storage zone cannot hold all atoms.")
             SequentialPlacePass(placed.dialects, no_raise=False)(placed)
-            placement_strategy = make_physical_placement_strategy(arch_spec=architecture, search_budget=30)
-            placement_strategy.inner.restarts = 1  # one deterministic routing search per stage
+            placement_strategy = make_physical_placement_strategy(arch_spec=architecture, search_budget=30, return_moves=False)  # atoms stay put between CZ layers
+            placement_strategy.restarts = 1  # one deterministic routing search per stage
             compiled = PlaceToMove(
                 layout_heuristic=LogicalLayoutHeuristic(arch_spec=architecture),
                 placement_strategy=placement_strategy,
