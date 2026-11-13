@@ -21,12 +21,16 @@ name = "arqect"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "matplotlib" },
     { name = "mqt-ionshuttler" },
     { name = "mqt-qmap" },
     { name = "networkx" },
     { name = "numpy" },
     { name = "pyyaml" },
+    { name = "qiskit" },
+    { name = "scipy" },
     { name = "stim" },
+    { name = "zac" },
 ]
 
 [package.dev-dependencies]
@@ -38,12 +42,16 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "matplotlib", specifier = "==3.11.2" },
     { name = "mqt-ionshuttler", specifier = "==0.3.0" },
     { name = "mqt-qmap", specifier = "==3.11.0" },
     { name = "networkx", specifier = "==3.7" },
     { name = "numpy", specifier = "==2.5.4" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "qiskit", specifier = "==2.6.2" },
+    { name = "scipy", specifier = "==1.18.1" },
     { name = "stim", specifier = "==1.16.0" },
+    { name = "zac", directory = "third_party/zac" },
 ]
 
 [package.metadata.requires-dev]
@@ -1150,4 +1158,25 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/14/a3/2e9ab821d416000808b1c2b00a2ce1663b83f33c68d40251e560e127a76a/z3_solver-5.3.3.0-py3-none-win32.whl", hash = "sha256:7ae136a73ae44bfd9359883a3ee5a6819c0537de5f9c8f09b5d3463dd41572cb", size = 15110256, upload-time = "2026-10-29T14:14:03.701Z" },
     { url = "https://files.pythonhosted.org/packages/fd/e5/ae23ab342acb1a18adc893f633f24c0a227aa745888c162bbec7070e4a8e/z3_solver-5.3.3.0-py3-none-win_amd64.whl", hash = "sha256:d189844a586242fe3d2a701c09751a80d518645931931a7c6bf29df679044215", size = 16926690, upload-time = "2026-10-29T14:14:06.124Z" },
     { url = "https://files.pythonhosted.org/packages/81/67/64fbd2b32ed88d6e3a2de0a57bce2af0eec516ef620b7bfe9211d74c2c4a/z3_solver-5.3.3.0-py3-none-win_arm64.whl", hash = "sha256:b6db581c558022ce4ef5cff7a17c3d658eb2807fc73298a96b82a8f7afdb81dc", size = 17519150, upload-time = "2026-10-29T14:14:08.582Z" },
+]
+
+[[package]]
+name = "zac"
+version = "0.0.0+e508336"
+source = { directory = "third_party/zac" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "qiskit" },
+    { name = "rustworkx" },
+    { name = "scipy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "qiskit" },
+    { name = "rustworkx" },
+    { name = "scipy" },
 ]

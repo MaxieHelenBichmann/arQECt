@@ -1,0 +1,16 @@
+# Unmodified copy of the `zac/` package of https://github.com/UCLA-VAST/ZAC at commit e5083362f99e6915f20c2bd0eaa88b6d1cdcecac
+# (BSD 3-Clause, see LICENSE). Upstream ships no packaging metadata, so this file only makes it installable.
+[project]
+name = "zac"
+version = "0.0.0+e508336"
+description = "ZAC: reuse-aware compiler for zoned neutral atom architectures (Lin, Tan, Cong, HPCA 2025)"
+requires-python = ">=3.10"
+license = "BSD-3-Clause"
+dependencies = ["matplotlib", "numpy", "qiskit", "rustworkx", "scipy"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["zac"]

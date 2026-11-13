@@ -6,13 +6,20 @@ requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
+    "matplotlib==3.11.2",
     "mqt-ionshuttler==0.3.0",
     "mqt-qmap==3.11.0",
     "networkx==3.7",
     "numpy==2.5.4",
     "pyyaml>=6.0.3",
+    "qiskit==2.6.2",
+    "scipy==1.18.1",
     "stim==1.16.0",
+    "zac",
 ]
+
+[tool.uv.sources]
+zac = { path = "third_party/zac" }  # vendored, see third_party/zac/pyproject.toml
 
 [dependency-groups]
 dev = [
@@ -39,7 +46,7 @@ no_site_packages = true
 
 [tool.ruff]
 line-length = 120
-extend-exclude = ["data", "playground"]
+extend-exclude = ["data", "playground", "third_party"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "B", "UP"]
