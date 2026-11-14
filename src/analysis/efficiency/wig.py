@@ -19,6 +19,15 @@ class InteractionGraphAnalyzer(MetricExtractor):
     def analyze(self) -> dict[str, object]: # assume valid hardware parameters (especially capacities >0, SC topology has at least as many qubits as the wig), symmetric wig
         result: dict[str, object] = {}
 
+        if len(self.wig.graph) == 0: # no 2q gates -> metrics undefined
+            for key in ["fraction_of_partner_capacity_exceeding_qubits", "weighted_fraction_of_partner_capacity_exceeding_qubits",
+                        "fraction_of_effective_partner_capacity_exceeding_qubits", "max_partner_capacity_ratio",
+                        "average_interaction_partner_diversity", "average_interaction_entropy", "average_effective_partner_number",
+                        "interaction_concentration", "statically_servable_interaction_fraction", "capacity_constrained_qubit_partition",
+                        "non_bipartite_interaction_fraction", "nr_connected_components", "largest_component_fraction"]:
+                result[key] = None
+            return result
+
         # partner capacity
         result["fraction_of_partner_capacity_exceeding_qubits"] = self._fraction_of_partner_capacity_exceeding_qubits()
         result["weighted_fraction_of_partner_capacity_exceeding_qubits"] = self._weighted_fraction_of_partner_capacity_exceeding_qubits()

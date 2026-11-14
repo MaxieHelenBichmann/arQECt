@@ -28,7 +28,7 @@ class DependencyDAGAnalyzer(MetricExtractor):
         result["2q_depth"] = self._2q_depth()
         result["critical_path_duration"] = self._critical_path_duration()
         result["parallelism_saturation"] = self._parallelism_saturation()
-        result["capacity_constrained_depth_bound"] = self._2q_depth()
+        result["capacity_constrained_depth_bound"] = self._capacity_constrained_depth_bound()
         result["min_idle_steps"] = self._min_idle_steps()
 
         # scheduling choices
