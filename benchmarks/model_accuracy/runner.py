@@ -104,14 +104,6 @@ def run(platforms: list[PlatformTag] | None = None, max_qubits: int | None = Non
 
 
 def save_raw_results(file: Path, metadata: dict, anchors: dict[int, int], abstract: tuple, compiled: tuple, baseline: tuple) -> None:
-    """Store one comparison (one hardware config, one circuit) as CSV: the metadata, then source, metric, qubit, anchor, count, value.
-    Sources: the circuit, the abstract model, the compiler and the naive per-gate model ("per_gate").
-
-    - circuit anchors: one row per qubit (source "circuit"), with its number of anchor operations in `value`
-    - event lists (e.g. interaction_zone_entry): one row per event, in list (= chronological) order, count 1
-    - {(qubit, anchor): count} details (e.g. shuttles, swaps): one row per entry
-    - other details (e.g. wall_clock_s): one row with the number in `value`
-    """
     file.parent.mkdir(parents=True, exist_ok=True)
     with open(file, "w", newline="") as f:
         writer = csv.writer(f)
