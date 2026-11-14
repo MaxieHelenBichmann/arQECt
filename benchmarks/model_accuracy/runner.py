@@ -17,8 +17,8 @@ from benchmarks.common_reference.abstract_execution import _RUN_ABSTRACTION, _RU
 from benchmarks.common_reference.architecture_preparation import _PREPARE_HARDWARE
 from benchmarks.model_accuracy.visualization import visualize
 
-_CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / "configs"
-_CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / "circuits"
+_CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "configs"
+_CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "circuits"
 _RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "model_accuracy"
 
 
@@ -36,9 +36,9 @@ def run(platforms: list[PlatformTag] | None = None, max_qubits: int | None = Non
                 shutil.rmtree(raw_dir)
                 print(f"Emptied {raw_dir}...")
 
-    # collect different circuits
+    # collect different circuits (flattened from data/circuits/<code family>/<task>/)
     circuits = {}
-    for circuit_file in sorted(_CIRCUIT_DIR.glob("*.stim")):
+    for circuit_file in sorted(_CIRCUIT_DIR.glob("*/*/*.stim")):
         name = circuit_file.stem
         circuit = stim.Circuit.from_file(circuit_file)
         if max_qubits is None or circuit.num_qubits <= max_qubits:
