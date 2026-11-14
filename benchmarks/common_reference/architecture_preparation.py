@@ -14,6 +14,10 @@ from mqt.ionshuttler.linear import Architecture as TIArchitecture
 from mqt.qmap.na.zoned import ZonedNeutralAtomArchitecture
 from mqt.qmap.sc import Architecture as SCArchitecture
 
+
+from src.models.hardware import HardwareModel, PlatformTag
+from collections.abc import Callable
+
 HardwareArchitecture = TIArchitecture | ZonedNeutralAtomArchitecture | SCArchitecture | CouplingMap | dict
 
 # native gate sets (canonical stim gate names), matching the 1-to-1 transpilation in compilation.py
@@ -194,3 +198,10 @@ def prepare_sc_hardware(parameters: dict, num_qubits: int) -> tuple[Superconduct
     abstract_model = SuperconductingQubitsModel(number_of_qubits=num_qubits, topology=dict(Counter(d for _, d in chip.degree)),
                                                 gate_durations={"SN": 1, "MS": 1, "EN": 1}, native_gates=SC_NATIVE_GATES)
     return abstract_model, concrete_hardware
+
+
+_PREPARE_HARDWARE : dict[PlatformTag, Callable[[dict, int], tuple[HardwareModel, dict[str, HardwareArchitecture]]]] = {
+    "TI": prepare_ti_hardware,
+    "NA": prepare_na_hardware,
+    "SC": prepare_sc_hardware
+}

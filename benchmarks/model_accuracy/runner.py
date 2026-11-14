@@ -12,40 +12,14 @@ from collections.abc import Callable
 
 from src.models.hardware import HardwareModel, HardwareEvents, PlatformTag
 
-from benchmarks.model_accuracy.compilation import (run_ti_mqt_compiler, run_na_mqt_compiler, run_na_bloqade_compiler, run_sc_mqt_compiler, run_sc_sabre_compiler,
-                                                   run_ti_abstraction, run_na_abstraction, run_sc_abstraction, run_ti_baseline, run_na_baseline,
-                                                   run_sc_baseline)
-from benchmarks.model_accuracy.architecture_preparation import prepare_ti_hardware, prepare_na_hardware, prepare_sc_hardware, HardwareArchitecture
+from benchmarks.common_reference.compilation import  _RUN_COMPILER 
+from benchmarks.common_reference.abstract_execution import _RUN_ABSTRACTION, _RUN_BASELINE
+from benchmarks.common_reference.architecture_preparation import _PREPARE_HARDWARE
 from benchmarks.model_accuracy.visualization import visualize
 
 _CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / "configs"
 _CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "model_accuracy" / "circuits"
 _RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "model_accuracy"
-
-_PREPARE_HARDWARE : dict[PlatformTag, Callable[[dict, int], tuple[HardwareModel, dict[str, HardwareArchitecture]]]] = {
-    "TI": prepare_ti_hardware,
-    "NA": prepare_na_hardware,
-    "SC": prepare_sc_hardware
-}
-
-_RUN_BASELINE : dict[PlatformTag, Callable[[stim.Circuit], tuple[HardwareModel, HardwareEvents | dict]]] = {
-    "TI": run_ti_baseline,
-    "NA": run_na_baseline,
-    "SC": run_sc_baseline
-}
-
-_RUN_ABSTRACTION : dict[PlatformTag, Callable[[HardwareModel,  stim.Circuit], tuple[HardwareModel, HardwareEvents | dict]]] = {
-    "TI": run_ti_abstraction,
-    "NA": run_na_abstraction,
-    "SC": run_sc_abstraction
-}
-
-# independent compilers per platform (name -> compiler), each compared to the abstract model on its own
-_RUN_COMPILER : dict[PlatformTag, dict[str, Callable[[HardwareArchitecture | dict, stim.Circuit, float], tuple[HardwareModel, HardwareEvents | dict]]]] = {
-    "TI": {"IonShuttler": run_ti_mqt_compiler},
-    "NA": {"QMAP": run_na_mqt_compiler, "Bloqade": run_na_bloqade_compiler},
-    "SC": {"QMAP": run_sc_mqt_compiler, "SABRE": run_sc_sabre_compiler}
-}
 
 
 def run(platforms: list[PlatformTag] | None = None, max_qubits: int | None = None, max_compile_time: float = 600.0, clean: bool = False,
