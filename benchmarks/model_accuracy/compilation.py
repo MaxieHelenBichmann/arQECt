@@ -393,25 +393,39 @@ def run_na_bloqade_compiler(hardware: dict, circuit: stim.Circuit, max_compile_t
     storage_moves: Counter[tuple[int, int]] = Counter()
     move_distance: Counter[tuple[int, int]] = Counter()
     rearrangement_jobs = 0
+    journey_start: dict[int, int] = {}  # atom -> word where its current journey (all its moves since the last anchor op) began
+    def end_journeys() -> None:
+        # hardware events: one per journey (net start -> end), since one trip along the fixed lanes is split into many single-hop moves
+        for atom, begin in journey_start.items():
+            src, dst = sites.get(begin), sites.get(current[atom])
+            if (src is None) != (dst is None):
+                hardware_events.storage_entanglement.append((atom, qubit_steps[atom]))
+            elif src is not None and src != dst:
+                hardware_events.inter_entanglement.append((atom, qubit_steps[atom]))
+        journey_start.clear()
+    current: dict[int, int] = {}  # atom -> current word
     for op, targets in instructions:
         if op == "anchor":
+            end_journeys()
             for atom in targets:
                 qubit_steps[atom] += 1
         else:
             rearrangement_jobs += 1
             for atom, begin, end in targets:
+                journey_start.setdefault(atom, begin)
+                current[atom] = end
+                # details: real counts per single move
                 src, dst = sites.get(begin), sites.get(end)
                 anchor = (atom, qubit_steps[atom])
                 transports[anchor] += 1
                 move_distance[anchor] += math.dist(positions[begin], positions[end])
                 if (src is None) != (dst is None):
                     zone_changes[anchor] += 1
-                    hardware_events.storage_entanglement.append(anchor)
                 elif src is None:
                     storage_moves[anchor] += 1
                 elif src != dst:
                     site_changes[anchor] += 1
-                    hardware_events.inter_entanglement.append(anchor)
+    end_journeys()
 
     expected_steps = Counter(t.value for op in circuit for group in op.target_groups() for t in group
                              if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
