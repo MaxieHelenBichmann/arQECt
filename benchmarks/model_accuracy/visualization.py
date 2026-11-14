@@ -21,8 +21,9 @@ from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnchoredOffsetbox, HPacker, PaddedBox, TextArea, VPacker
 from scipy.stats import kendalltau, spearmanr, theilslopes
 
-SURFACE, TEXT, TEXT_SECONDARY, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#898781"
-GRID, BASELINE, SERIES, FIT, REFERENCE = "#e1e0d9", "#c3c2b7", "#2a78d6", "#0d366b", "#e34948"
+from benchmarks.common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY, MUTED, GRID, SERIES, REFERENCE, save
+
+BASELINE, FIT =  "#c3c2b7", "#0d366b"
 PER_GATE_COLORS = ["#13917f", "#86a01b"]  # per-gate model per compiler: cool teal-green, warm olive-green
 RING_SIZE, RING_WIDTH = 40, 1.4
 # one color ramp (shade = qubits in circuit), color and marker per compiler, with QMAP first (blue)
@@ -43,7 +44,6 @@ COMPILER_GLYPHS = ["●", "■"]
 QUBIT_MIN, QUBIT_MAX = 4, 50
 QUBIT_TICKS = (4, 10, 20, 30, 40, 50)
 COUNT_TICKS = (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000)
-DPI = 200
 EQUIVALENCE_FACTOR = 1.5
 BAND_SHARE = 0.8
 BOOTSTRAP_SAMPLES = 500
@@ -182,11 +182,6 @@ def style(
                 borderpad=0,
             )
         )
-
-
-def save(fig, file: str) -> None:
-    fig.savefig(file, dpi=DPI, facecolor=SURFACE, bbox_inches="tight", pad_inches=0.25)
-    plt.close(fig)
 
 
 def qubit_colorbars(fig, ax, mappables: list[tuple[str, int, ScalarMappable]]) -> None:
