@@ -26,8 +26,8 @@ from benchmarks.common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY, 
 
 GAP_BINS = ("small", "medium", "large")  # metric percentile gap < 1/3, < 2/3, <= 1
 COLUMNS = [("TI", "IonShuttler"), ("NA", "QMAP"), ("NA", "Bloqade"), ("SC", "QMAP"), ("SC", "SABRE")]
-DESIGNS = {"comparable_task": "comparable-task pairs (circuits of the same task folder)",
-           "matched_workload": "matched-workload pairs (equal qubits, 2q gates within 1.25x)"}
+DESIGNS = {"comparable_task": "comparable-task pairs (circuits for the same task and QEC code)",
+           "matched_workload": "matched-workload pairs (circuit with the same number of qubits, and roughly same number of 2q gates within 1.25x)"}
 DIVERGING = LinearSegmentedColormap.from_list("diverging", [REFERENCE, "#f6d3cf", "#f7f6f2", "#cfe0f5", SERIES])
 UNAVAILABLE = "#efeeea"
 
@@ -107,8 +107,9 @@ def visualize(results_dir: Path) -> None:
         cells = {(r["metric"], r["platform"], r["compiler"]): r for r in summary if r.get("design") in (design, None)}
         bins = {(r["metric"], r["platform"], r["compiler"], r["gap_bin"]): r for r in gaps if r["design"] == design}
 
-        # F1: concordance per metric and platform / compiler
-        fig, ax = draw_rows(len(COLUMNS), f"Static metric validation scorecard: {title}")
+        # concordance per metric and platform / compiler
+        fig, ax = draw_rows(len(COLUMNS), f"Validation of static (runtime cost) metrics - scorecard of {title}",
+                            "Correlation: Comparing two circuits, does the static metric predict the right order of their actual runtime costs?")
         norm = Normalize(0.25, 0.75)
         for x, (platform, compiler) in enumerate(COLUMNS):
             ax.text(x + 0.5, -0.3, f"{platform}\n{compiler}", ha="center", va="bottom", color=TEXT, fontsize=8.5, fontweight="bold")
@@ -118,20 +119,23 @@ def visualize(results_dir: Path) -> None:
                     cell(ax, x, y, 1, UNAVAILABLE, row["status"] if row else "no runs", MUTED, 6.5)
                     continue
                 significant = float(row["C_lo"]) > 0.5 or float(row["C_hi"]) < 0.5
-                cell(ax, x, y, 1, DIVERGING(norm(float(row["C"]))), f"{float(row['C']):.2f}", MUTED if row["sparse"] else TEXT, 7.5,
+                cell(ax, x, y, 1, DIVERGING(norm(float(row["C"]))), f"{float(row['C']):.2f}", "black", 7.5,
                      bold=significant, hatch=row["sparse"])
                 ax.text(x + 0.95, y + 0.85, str(row["n_families"]), ha="right", va="bottom", color=TEXT_SECONDARY, fontsize=5)
-        caption(fig, ax, norm, "C: weighted share of metric-untied pairs whose predicted-worse circuit costs more (0.5 = random)", [
-            "Only runtime cost metrics are validated (against hardware events of the compiled circuit); compilation cost metrics are excluded.",
-            "Costs (totals per compiled circuit, not normalized): routing = qubit moves (SC swaps, TI shuttles, NA atom transports); zones = zone changes;",
-            "schedule = compiled schedule length, idle = time qubits wait between their gates (both in compiler timesteps).",
-            "Bold: family-bootstrap 95% CI excludes 0.5. Small number: code families with untied pairs; hatched: fewer than 3.",
-            "Grey: no estimate (cost not measured by the compilation wrappers, all pairs tied, or no pairs)."])
-        save(fig, str(out_dir / f"f1_scorecard_{design}.png"))
+        caption(fig, ax, norm, "weighted share of circuit pairs whose predicted-worse circuit actually costs more (0.5 = random)", [
+            "Runtime costs (aggregated per compiled circuit, not normalized):",
+            "   - routing  = qubit moves (SC swaps, TI shuttles, NA atom transports)",
+            "   - zones    = zone changes (TI interaction zones, NA functional zones)",
+            "   - schedule = compiled schedule length",
+            "   - idle     = time qubits wait between their gates (in compiler timesteps)",
+            "",
+            "hatched: fewer than 3 circuits to compare"])
+        save(fig, str(out_dir / f"scorecard_{design}.png"))
 
-        # F2: median signed separation d_y (color) and median |d_y| (number) per metric percentile gap bin
+        # median signed separation d_y (color) and median |d_y| (number) per metric percentile gap bin
         width = len(GAP_BINS) * 0.6 + 0.25
-        fig, ax = draw_rows(len(COLUMNS) * width, f"Gap response: {title}")
+        fig, ax = draw_rows(len(COLUMNS) * width, f"Validation of static (runtime cost) metrics - gap response of {title}",
+                            "Proportionality: Comparing two circuits, does a larger difference in the static metric correspond to a larger difference in runtime cost?")
         norm = Normalize(-0.5, 0.5)
         for g, (platform, compiler) in enumerate(COLUMNS):
             ax.text(g * width + 0.9, -0.9, f"{platform} {compiler}", ha="center", va="bottom", color=TEXT, fontsize=8.5, fontweight="bold")
@@ -149,12 +153,11 @@ def visualize(results_dir: Path) -> None:
                         continue
                     sparse = gap["n_families"] < 3
                     cell(ax, g * width + b * 0.6, y, 0.6, DIVERGING(norm(float(gap["median_signed_d"]))), f"{float(gap['median_abs_d']):.2f}",
-                         MUTED if sparse else TEXT, 6, hatch=sparse)
-        caption(fig, ax, norm, "median signed separation d_y = (y_worse - y_better) / (y_worse + y_better) of the predicted pair (1/3 = twice the cost)", [
-            "Only runtime cost metrics are validated (against hardware events of the compiled circuit); compilation cost metrics are excluded.",
+                         "black", 6, hatch=sparse)
+        caption(fig, ax, norm, r"median signed separation d_y = \frac{y_{\text{worse}} - y_{\text{better}}}{y_{\text{worse}} + y_{\text{better}}} of the predicted pair (1/3 = twice the cost)", [
             "Bins: metric percentile gap of the two circuits (small < 1/3 <= medium < 2/3 <= large); all metric-untied pairs incl. reversals.",
             "Number: median |d_y|, i.e. whether physical differences grow with the metric gap. Hatched: fewer than 3 families; '–': empty bin."])
-        save(fig, str(out_dir / f"f2_gap_response_{design}.png"))
+        save(fig, str(out_dir / f"gap_response_{design}.png"))
     print(f"Saved plots to {out_dir}")
 
 
@@ -168,7 +171,7 @@ def rows() -> list[tuple[int, str]]:
     return result
 
 
-def draw_rows(width: float, title: str):
+def draw_rows(width: float, title: str, subtitle: str):
     """Figure with the representation headers and metric labels (with preferred direction) left of the cells."""
     fig, ax = plt.subplots(figsize=(3 + 1.6 * width, 0.27 * len(rows()) + 3), facecolor=SURFACE)
     y = 0
@@ -181,7 +184,9 @@ def draw_rows(width: float, title: str):
     ax.set_xlim(0, width)
     ax.set_ylim(y, 0)
     ax.axis("off")
-    ax.set_title(title, loc="left", color=TEXT, fontsize=11, fontweight="bold", pad=34)
+    ax.set_title(title, loc="left", color=TEXT, fontsize=11, fontweight="bold", pad=52)
+    ax.annotate(subtitle, xy=(0, 1), xycoords="axes fraction", xytext=(0, 36), textcoords="offset points", ha="left", va="bottom",
+                color=TEXT, fontsize=9, fontweight="bold")
     return fig, ax
 
 
