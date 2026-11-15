@@ -74,8 +74,6 @@ HYPOTHESES = {
         "statically_servable_interaction_fraction": (-1, "routing"),
         "capacity_constrained_qubit_partition": (1, "routing"),
         "non_bipartite_interaction_fraction": (1, "routing"),
-        "nr_connected_components": (-1, "routing"),
-        "largest_component_fraction": (1, "routing"),
     },
     "Qubit timelines": {
         "average_interaction_reuse_distance": (1, "routing"),
@@ -116,8 +114,6 @@ LABELS = {
     "statically_servable_interaction_fraction": "statically servable interactions",
     "capacity_constrained_qubit_partition": "capacity qubit partition",
     "non_bipartite_interaction_fraction": "non-bipartite interactions",
-    "nr_connected_components": "connected components",
-    "largest_component_fraction": "largest component",
     "average_interaction_reuse_distance": "interaction reuse distance",
     "share_partner_reusing_qubits": "partner-reusing qubits",
     "capacity_constrained_reuse": "capacity reuse",

@@ -24,7 +24,7 @@ class InteractionGraphAnalyzer(MetricExtractor):
                         "fraction_of_effective_partner_capacity_exceeding_qubits", "max_partner_capacity_ratio",
                         "average_interaction_partner_diversity", "average_interaction_entropy", "average_effective_partner_number",
                         "interaction_concentration", "statically_servable_interaction_fraction", "capacity_constrained_qubit_partition",
-                        "non_bipartite_interaction_fraction", "nr_connected_components", "largest_component_fraction"]:
+                        "non_bipartite_interaction_fraction"]:
                 result[key] = None
             return result
 
@@ -43,7 +43,6 @@ class InteractionGraphAnalyzer(MetricExtractor):
         result["statically_servable_interaction_fraction"] = self._statically_servable_interaction_fraction()
         result["capacity_constrained_qubit_partition"] = self._capacity_constrained_qubit_partition()
         result["non_bipartite_interaction_fraction"] = self._non_bipartite_interaction_fraction()
-        result["nr_connected_components"], result["largest_component_fraction"] = self._connected_components()
         return result
 
     def _fraction_of_partner_capacity_exceeding_qubits(self) -> float:
@@ -216,27 +215,3 @@ class InteractionGraphAnalyzer(MetricExtractor):
         same_side = sum(w for a, neighbors in self.wig.graph.items() for b, w in neighbors.items() if a < b and side[a] == side[b])
         total = sum(w for a, neighbors in self.wig.graph.items() for b, w in neighbors.items() if a < b)
         return same_side / total
-
-    def _connected_components(self) -> tuple[int, float]:
-        """Number of connected components of the WIG and the fraction of interacting qubits in the largest one.
-
-        Range [1, nr_qubits / 2] and (0, 1]. More components and smaller largest component better = independent blocks.
-        """
-        seen: set[int] = set()
-        sizes = []
-        for start in self.wig.graph:
-            if start in seen:
-                continue
-            seen.add(start)
-            stack = [start]
-            size = 0
-            while stack:
-                q = stack.pop()
-                size += 1
-                for neighbor in self.wig.graph[q]:
-                    if neighbor not in seen:
-                        seen.add(neighbor)
-                        stack.append(neighbor)
-            sizes.append(size)
-
-        return len(sizes), max(sizes) / len(self.wig.graph)
