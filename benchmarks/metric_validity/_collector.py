@@ -11,7 +11,7 @@ from src.models.hardware import PlatformTag
 from benchmarks.common_reference.compilation import _RUN_COMPILER
 from benchmarks.common_reference.structural_analysis import _RUN_STRUCTURAL_ANALYSIS
 from benchmarks.common_reference.architecture_preparation import _PREPARE_HARDWARE
-from benchmarks.static_metric_validation._visualizer import visualize
+from benchmarks.metric_validity._visualizer import visualize
 
 
 def collect(platforms: list[str], circuit_dir: Path, config_dir: Path, results_dir: Path, max_qubits: int, max_compile_time: int) -> None:

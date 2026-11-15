@@ -13,13 +13,13 @@ from src.models.hardware import PlatformTag
 from benchmarks.common_reference.compilation import _RUN_COMPILER
 from benchmarks.common_reference.structural_analysis import _RUN_STRUCTURAL_ANALYSIS
 from benchmarks.common_reference.architecture_preparation import _PREPARE_HARDWARE
-from benchmarks.static_metric_validation._visualizer import visualize
-from benchmarks.static_metric_validation._collector import collect
-from benchmarks.static_metric_validation._summarizer import summarize
+from benchmarks.metric_validity._visualizer import visualize
+from benchmarks.metric_validity._collector import collect
+from benchmarks.metric_validity._summarizer import summarize
 
 _CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "configs"
 _CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "circuits"
-_RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "static_metric_validation"
+_RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "metric_validity"
 
 
 def run(platforms: list[PlatformTag], max_qubits: int, max_compile_time: float, clean: bool) -> None:
