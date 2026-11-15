@@ -8,9 +8,9 @@ import yaml
 
 from src.models.hardware import PlatformTag
 
-from benchmarks.common_reference.compilation import _RUN_COMPILER
-from benchmarks.common_reference.structural_analysis import _RUN_STRUCTURAL_ANALYSIS
-from benchmarks.common_reference.architecture_preparation import _PREPARE_HARDWARE
+from benchmarks._common_reference.compilation import _RUN_COMPILER
+from benchmarks._common_reference.structural_analysis import _RUN_STRUCTURAL_ANALYSIS
+from benchmarks._common_reference.architecture_preparation import _PREPARE_HARDWARE
 from benchmarks.metric_validity._visualizer import visualize
 
 

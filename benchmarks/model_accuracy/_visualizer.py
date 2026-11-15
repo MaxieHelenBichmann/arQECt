@@ -14,7 +14,7 @@ from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnchoredOffsetbox, HPacker, PaddedBox, TextArea, VPacker
 
-from benchmarks.common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY, MUTED, GRID, SERIES, REFERENCE, save
+from benchmarks._common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY, MUTED, GRID, SERIES, REFERENCE, save
 from benchmarks.model_accuracy._summarizer import (
     ALIGNMENT_GAP,
     BAND_SHARE,

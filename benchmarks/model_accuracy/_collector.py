@@ -7,9 +7,9 @@ from pathlib import Path
 import stim
 import yaml
 
-from benchmarks.common_reference.compilation import  _RUN_COMPILER 
-from benchmarks.common_reference.abstract_execution import _RUN_ABSTRACTION, _RUN_BASELINE
-from benchmarks.common_reference.architecture_preparation import _PREPARE_HARDWARE
+from benchmarks._common_reference.compilation import  _RUN_COMPILER 
+from benchmarks._common_reference.abstract_execution import _RUN_ABSTRACTION, _RUN_BASELINE
+from benchmarks._common_reference.architecture_preparation import _PREPARE_HARDWARE
 
 
 def collect(platforms: list[str], circuit_dir: Path, config_dir: Path, results_dir: Path, max_qubits: int, max_compile_time: int) -> None:

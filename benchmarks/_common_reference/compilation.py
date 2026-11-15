@@ -14,7 +14,7 @@ from collections import Counter, defaultdict
 from src.models.hardware import HardwareModel, PlatformTag, HardwareEvents
 from collections.abc import Callable
 
-from benchmarks.common_reference.architecture_preparation import HardwareArchitecture
+from benchmarks._common_reference.architecture_preparation import HardwareArchitecture
 
 import stim
 from mqt.core.ir import QuantumComputation

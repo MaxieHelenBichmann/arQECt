@@ -12,7 +12,7 @@ from matplotlib.cm import ScalarMappable
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.patches import Rectangle
 
-from benchmarks.common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY, MUTED, GRID, SERIES, REFERENCE, save
+from benchmarks._common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY, MUTED, GRID, SERIES, REFERENCE, save
 from benchmarks.static_metric_validation._summarizer import HYPOTHESES
 
 COLUMNS = [("TI", "IonShuttler"), ("NA", "QMAP"), ("NA", "Bloqade"), ("SC", "QMAP"), ("SC", "SABRE")]

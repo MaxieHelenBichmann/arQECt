@@ -16,7 +16,7 @@ import stim
 from src.models.hardware import HardwareModel, PlatformTag, HardwareEvents, TrappedIonsHardwareEvents, TrappedIonsModel, SuperconductingQubitsHardwareEvents, SuperconductingQubitsModel, NeutralAtomsHardwareEvents, NeutralAtomsModel
 from collections.abc import Callable
 
-from benchmarks.common_reference.architecture_preparation import HardwareArchitecture
+from benchmarks._common_reference.architecture_preparation import HardwareArchitecture
 
 
 def run_ti_abstraction(hardware: TrappedIonsModel, circuit: stim.Circuit) -> tuple[TrappedIonsHardwareEvents, dict]:
