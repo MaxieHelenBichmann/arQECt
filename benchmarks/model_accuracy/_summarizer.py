@@ -23,7 +23,7 @@ TI_ION_MOVES = ("shuttles", "swaps")  # swaps count once per participating ion
 NA_ZONE_CHANGES = ("storage_entanglement", "storage_readout", "entanglement_readout", "inter_entanglement")
 
 
-def summarize(platform: list[str], results_dir: Path, max_qubits: int | None = None) -> None:
+def summarize(platform: list[str], results_dir: Path, max_qubits: int) -> None:
     for hardware in ("TI", "NA", "SC"):
         if hardware not in platform:
             continue
@@ -38,7 +38,7 @@ def summarize(platform: list[str], results_dir: Path, max_qubits: int | None = N
         for file in sorted((results_dir / prefix / "raw").glob("*.csv")):
             with file.open(newline="") as f:
                 rows = list(csv.DictReader(f))
-            if rows and (max_qubits is None or int(rows[0]["num_qubits"]) <= max_qubits):
+            if rows and int(rows[0]["num_qubits"]) <= max_qubits:
                 runs[rows[0]["config"]].append(rows)
         for config, circuits in sorted(runs.items()):
             name = re.sub(r"[^a-z0-9]+", "_", config.lower()).strip("_")

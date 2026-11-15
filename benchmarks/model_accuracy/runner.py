@@ -26,10 +26,10 @@ def run(platforms: list[PlatformTag], max_qubits: int, max_compile_time: float, 
 
     if clean:
         for platform in platforms:
-            raw_dir = _RESULTS_DIR / platform.lower() / "raw"
-            if raw_dir.exists():
-                shutil.rmtree(raw_dir)
-                print(f"Emptied {raw_dir}...")
+            platform_dir = _RESULTS_DIR / platform.lower()
+            if platform_dir.exists():
+                shutil.rmtree(platform_dir)
+                print(f"Emptied {platform_dir}...")
 
     collect(platforms, _CIRCUIT_DIR, _CONFIG_DIR, _RESULTS_DIR, max_qubits, max_compile_time)
     summarize(platforms, _RESULTS_DIR, max_qubits)
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-qubits", type=int, default=sys.maxsize, help="skip circuits with more qubits (default: no limit)")
     parser.add_argument("--max-compile-time", type=float, default=600.0, help="time limit per compilation in seconds (default: 600)")
     parser.add_argument("--clean", action="store_true",
-                        help="delete all files in the raw result directories of the run platforms before running")
+                        help="delete all results (raw, intermediate csvs, plots) of the run platforms before running")
     args = parser.parse_args()
 
     run(platforms=args.platform, max_qubits=args.max_qubits, max_compile_time=args.max_compile_time, clean=args.clean)
