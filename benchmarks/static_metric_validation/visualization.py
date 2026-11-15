@@ -1,5 +1,5 @@
-"""Concordance, gap response and decision regret of the static metrics on circuit pairs (plan §4, §5), and their plots:
-F1 (validation scorecard: concordance C) and F2 (gap response: signed cost separation per metric gap bin).
+"""Concordance, proportionality and decision regret of the static metrics on circuit pairs (plan §4, §5), and their plots:
+scorecard (concordance C: right order of the costs) and proportionality (P: larger metric gap = larger cost difference).
 Only the runtime cost aspect is validated (hardware events of the compiled circuit), not the compilation cost (compiler work / freedom).
 
 Pairs: comparable task (circuits in the same data folder) and matched workload (equal qubits, similar number of 2q gates).
@@ -24,7 +24,6 @@ from scipy.stats import rankdata
 
 from benchmarks.common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY, MUTED, GRID, SERIES, REFERENCE, save
 
-GAP_BINS = ("small", "medium", "large")  # metric percentile gap < 1/3, < 2/3, <= 1
 COLUMNS = [("TI", "IonShuttler"), ("NA", "QMAP"), ("NA", "Bloqade"), ("SC", "QMAP"), ("SC", "SABRE")]
 DESIGNS = {"comparable_task": "comparable-task pairs (circuits for the same task and QEC code)",
            "matched_workload": "matched-workload pairs (circuit with the same number of qubits, and roughly same number of 2q gates within 1.25x)"}
@@ -87,7 +86,6 @@ HYPOTHESES = {
         "_activity_imbalance": (1, "schedule"),
     },
     "Workload baselines": {
-        "num_qubits": (1, "routing"),
         "N_2q": (1, "routing"),
     },
 }
@@ -95,69 +93,50 @@ HYPOTHESES = {
 # ------------------------------------------------------------------------------------------------------------------------------------------------
 
 def visualize(results_dir: Path) -> None:
-    summary, gaps = summarize(results_dir)
+    summary = summarize(results_dir)
     write_csv(results_dir / "summary.csv", summary)
-    write_csv(results_dir / "gap_summary.csv", gaps)
     summary = [row for row in summary if row["scope"] == "platform"]
-    gaps = [row for row in gaps if row["scope"] == "platform"]
     out_dir = results_dir / "plots"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    costs = ["Runtime costs (aggregated per compiled circuit, not normalized):",
+             "   - routing  = qubit moves (SC swaps, TI shuttles, NA atom transports)",
+             "   - zones    = zone changes (TI interaction zones, NA functional zones)",
+             "   - schedule = compiled schedule length",
+             "   - idle     = time qubits wait between their gates (in compiler timesteps)",
+             ""]
+    # per plot: value, its neutral value and color range, file name, subtitle, color bar label, notes
+    plots = [("C", 0.5, Normalize(0.25, 0.75), "scorecard",
+              "Correlation: Comparing two circuits, does the static metric predict the right order of their actual runtime costs?",
+              "weighted share of circuit pairs whose predicted-worse circuit actually costs more (0.5 = random)",
+              costs + ["bold: 95% CI excludes 0.5; hatched: fewer than 3 code families to compare"]),
+             ("P", 0.0, Normalize(-1, 1), "proportionality",
+              "Proportionality: Comparing two circuits, does a larger difference in the static metric correspond to a larger difference in runtime cost?",
+              "weighted Spearman correlation between the metric difference of a pair and its signed cost difference " r"$\dfrac{y_{\mathrm{worse}} - y_{\mathrm{better}}}{y_{\mathrm{worse}} + y_{\mathrm{better}}}$" " (0 = no relation)",
+              costs + ["metric difference = distance of the two circuits in the metric's ranking",
+                       "signed cost difference > 0 if the predicted-worse circuit costs more",
+                       "hatched: fewer than 3 circuits to compare"])]
+
     for design, title in DESIGNS.items():
         cells = {(r["metric"], r["platform"], r["compiler"]): r for r in summary if r.get("design") in (design, None)}
-        bins = {(r["metric"], r["platform"], r["compiler"], r["gap_bin"]): r for r in gaps if r["design"] == design}
-
-        # concordance per metric and platform / compiler
-        fig, ax = draw_rows(len(COLUMNS), f"Validation of static (runtime cost) metrics - scorecard of {title}",
-                            "Correlation: Comparing two circuits, does the static metric predict the right order of their actual runtime costs?")
-        norm = Normalize(0.25, 0.75)
-        for x, (platform, compiler) in enumerate(COLUMNS):
-            ax.text(x + 0.5, -0.3, f"{platform}\n{compiler}", ha="center", va="bottom", color=TEXT, fontsize=8.5, fontweight="bold")
-            for y, metric in rows():
-                row = cells.get((metric, platform, compiler))
-                if row is None or row["status"] != "defined":
-                    cell(ax, x, y, 1, UNAVAILABLE, row["status"] if row else "no runs", MUTED, 6.5)
-                    continue
-                significant = float(row["C_lo"]) > 0.5 or float(row["C_hi"]) < 0.5
-                cell(ax, x, y, 1, DIVERGING(norm(float(row["C"]))), f"{float(row['C']):.2f}", "black", 7.5,
-                     bold=significant, hatch=row["sparse"])
-                ax.text(x + 0.95, y + 0.85, str(row["n_families"]), ha="right", va="bottom", color=TEXT_SECONDARY, fontsize=5)
-        caption(fig, ax, norm, "weighted share of circuit pairs whose predicted-worse circuit actually costs more (0.5 = random)", [
-            "Runtime costs (aggregated per compiled circuit, not normalized):",
-            "   - routing  = qubit moves (SC swaps, TI shuttles, NA atom transports)",
-            "   - zones    = zone changes (TI interaction zones, NA functional zones)",
-            "   - schedule = compiled schedule length",
-            "   - idle     = time qubits wait between their gates (in compiler timesteps)",
-            "",
-            "hatched: fewer than 3 circuits to compare"])
-        save(fig, str(out_dir / f"scorecard_{design}.png"))
-
-        # median signed separation d_y (color) and median |d_y| (number) per metric percentile gap bin
-        width = len(GAP_BINS) * 0.6 + 0.25
-        fig, ax = draw_rows(len(COLUMNS) * width, f"Validation of static (runtime cost) metrics - gap response of {title}",
-                            "Proportionality: Comparing two circuits, does a larger difference in the static metric correspond to a larger difference in runtime cost?")
-        norm = Normalize(-0.5, 0.5)
-        for g, (platform, compiler) in enumerate(COLUMNS):
-            ax.text(g * width + 0.9, -0.9, f"{platform} {compiler}", ha="center", va="bottom", color=TEXT, fontsize=8.5, fontweight="bold")
-            for b, gap_bin in enumerate(GAP_BINS):
-                ax.text(g * width + (b + 0.5) * 0.6, -0.15, gap_bin, ha="center", va="bottom", color=TEXT_SECONDARY, fontsize=6.5)
-            for y, metric in rows():
-                row = cells.get((metric, platform, compiler))
-                if row is None or row["status"] != "defined":
-                    cell(ax, g * width, y, 1.8, UNAVAILABLE, row["status"] if row else "no runs", MUTED, 6.5)
-                    continue
-                for b, gap_bin in enumerate(GAP_BINS):
-                    gap = bins.get((metric, platform, compiler, gap_bin))
-                    if gap is None:
-                        cell(ax, g * width + b * 0.6, y, 0.6, "#f7f6f2", "–", MUTED, 6)
+        for value, neutral, norm, name, subtitle, label, notes in plots:
+            fig, ax = draw_rows(len(COLUMNS), f"Validation of static (runtime cost) metrics - {name} of {title}", subtitle)
+            for x, (platform, compiler) in enumerate(COLUMNS):
+                ax.text(x + 0.5, -0.3, f"{platform}\n{compiler}", ha="center", va="bottom", color=TEXT, fontsize=8.5, fontweight="bold")
+                for y, metric in rows():
+                    row = cells.get((metric, platform, compiler))
+                    if row is None or row["status"] != "defined":
+                        cell(ax, x, y, 1, UNAVAILABLE, row["status"] if row else "no runs", MUTED, 6.5)
                         continue
-                    sparse = gap["n_families"] < 3
-                    cell(ax, g * width + b * 0.6, y, 0.6, DIVERGING(norm(float(gap["median_signed_d"]))), f"{float(gap['median_abs_d']):.2f}",
-                         "black", 6, hatch=sparse)
-        caption(fig, ax, norm, r"median signed separation d_y = \frac{y_{\text{worse}} - y_{\text{better}}}{y_{\text{worse}} + y_{\text{better}}} of the predicted pair (1/3 = twice the cost)", [
-            "Bins: metric percentile gap of the two circuits (small < 1/3 <= medium < 2/3 <= large); all metric-untied pairs incl. reversals.",
-            "Number: median |d_y|, i.e. whether physical differences grow with the metric gap. Hatched: fewer than 3 families; '–': empty bin."])
-        save(fig, str(out_dir / f"gap_response_{design}.png"))
+                    if np.isnan(row[value]):
+                        cell(ax, x, y, 1, UNAVAILABLE, "–", MUTED, 6.5)
+                        continue
+                    significant = row[f"{value}_lo"] > neutral or row[f"{value}_hi"] < neutral
+                    cell(ax, x, y, 1, DIVERGING(norm(row[value])), f"{row[value]:.2f}", "black", 7.5, bold=significant, hatch=row["sparse"])
+                    if not row["sparse"]:
+                        ax.text(x + 0.95, y + 0.85, str(row["n_families"]), ha="right", va="bottom", color=TEXT_SECONDARY, fontsize=5)
+            caption(fig, ax, norm, label, notes)
+            save(fig, str(out_dir / f"{name}_{design}.png"))
     print(f"Saved plots to {out_dir}")
 
 
@@ -204,9 +183,9 @@ def caption(fig, ax, norm, label: str, notes: list[str]) -> None:
     fig.text(0.02, colorbar.ax.get_position().y0 - 0.035, "\n".join(notes), color=MUTED, fontsize=7, va="top")
 
 
-def summarize(results_dir: Path) -> tuple[list[dict], list[dict]]:
-    """Per config / compiler and per platform / compiler (configs with equal weight): C, decisiveness and regret of every metric
-    (summary), and its gap-response profile (gaps), read from the raw results."""
+def summarize(results_dir: Path) -> list[dict]:
+    """Per config / compiler and per platform / compiler (configs with equal weight): C, P, decisiveness and regret of every metric,
+    read from the raw results."""
     warnings.simplefilter("ignore", RuntimeWarning)  # empty bootstrap replicates are expected
     strata = defaultdict(dict)  # (platform, config, compiler) -> circuit -> {group, family, structural metrics, compiled values, targets}
     for file in sorted((results_dir / "raw").glob("*/*.csv")):
@@ -224,7 +203,7 @@ def summarize(results_dir: Path) -> tuple[list[dict], list[dict]]:
     rng = np.random.default_rng(0)
     multiplicity = dict(zip(families, rng.multinomial(len(families), np.full(len(families), 1 / len(families)), size=1000).T))
 
-    summary, gaps = [], []
+    summary = []
     for (platform, config, compiler), circuits in sorted(strata.items()):
         for hypotheses in HYPOTHESES.values():
             for metric, (direction, target) in hypotheses.items():
@@ -233,9 +212,8 @@ def summarize(results_dir: Path) -> tuple[list[dict], list[dict]]:
                     summary.append({**base, "status": f"{target} n/a"})
                     continue
                 for design in ("comparable_task", "matched_workload"):
-                    row, gap = evaluate(circuits, metric, direction, target, design, multiplicity)
+                    row = evaluate(circuits, metric, direction, target, design, multiplicity)
                     summary.append({**base, "design": design, "target": target, **row})
-                    gaps += [{**base, "design": design, "target": target, **g} for g in gap]
         print(f"[{platform}] Analyzed {config} / {compiler}: {len(circuits)} compiled circuits")
 
     # platform / compiler summaries: configs with equal weight (mean of their estimates and of their bootstrap replicates)
@@ -248,32 +226,22 @@ def summarize(results_dir: Path) -> tuple[list[dict], list[dict]]:
         if not defined:
             summary.append({**platform_row, "scope": "platform", "config": "ALL", "status": rows[0]["status"]})
             continue
-        replicates = np.nanmean([r["_C"] for r in defined], axis=0)
+        replicates = {k: np.nanmean([r[f"_{k}"] for r in defined], axis=0) for k in ("C", "P")}
         n_families = max(r["n_families"] for r in defined)
         summary.append({**platform_row, "scope": "platform", "config": "ALL", "status": "defined",
-                        **{k: np.mean([r[k] for r in defined]) for k in ("C", "decisiveness", "regret_rel", "regret_rel_N_2q", "regret_rel_random")},
-                        "C_lo": np.nanpercentile(replicates, 2.5), "C_hi": np.nanpercentile(replicates, 97.5),
+                        **{k: np.nanmean([r[k] for r in defined]) for k in ("C", "P", "decisiveness", "regret_rel", "regret_rel_N_2q", "regret_rel_random")},
+                        **{f"{k}_lo": np.nanpercentile(v, 2.5) for k, v in replicates.items()},
+                        **{f"{k}_hi": np.nanpercentile(v, 97.5) for k, v in replicates.items()},
                         "n_pairs": sum(r["n_pairs"] for r in defined), "n_families": n_families, "sparse": n_families < 3,
                         "n_configs": len(defined)})
     for row in summary:
         row.pop("_C", None)
-
-    pooled = defaultdict(list)
-    for g in gaps:
-        pooled[(g["platform"], g["compiler"], g["metric"], g["design"], g["target"], g["gap_bin"])].append(g)
-    for (platform, compiler, metric, design, target, gap_bin), rows in pooled.items():
-        d = np.concatenate([r.pop("_d") for r in rows])
-        w = np.concatenate([r.pop("_w") for r in rows])  # weights sum to 1 per config, so configs count equally
-        gaps.append({"scope": "platform", "platform": platform, "config": "ALL", "compiler": compiler, "metric": metric, "design": design,
-                     "target": target, "gap_bin": gap_bin,
-                     "C": np.average(np.where(d > 0, 1.0, np.where(d == 0, 0.5, 0.0)), weights=w) if w.sum() else np.nan,
-                     "median_signed_d": weighted_median(d, w), "median_abs_d": weighted_median(np.abs(d), w),
-                     "n_pairs": len(d), "n_families": max(r["n_families"] for r in rows)})
-    return summary, gaps
+        row.pop("_P", None)
+    return summary
 
 
-def evaluate(circuits: dict, metric: str, direction: int, target: str, design: str, multiplicity: dict) -> tuple[dict, list]:
-    """Concordance C, decisiveness and relative regret (with family-bootstrap CI) and the gap-response profile of one metric on one pair set."""
+def evaluate(circuits: dict, metric: str, direction: int, target: str, design: str, multiplicity: dict) -> dict:
+    """Concordance C, proportionality P (both with family-bootstrap CI), decisiveness and relative regret of one metric on one pair set."""
     names = [n for n, c in circuits.items() if c[metric] is not None and c.get(target) is not None]
     if metric in ("average_interaction_reuse_distance", "capacity_constrained_reuse"):  # 0 means "no partner reuse", not the best value
         names = [n for n in names if circuits[n]["share_partner_reusing_qubits"] > 0]
@@ -289,7 +257,7 @@ def evaluate(circuits: dict, metric: str, direction: int, target: str, design: s
         keep = (q[left] == q[right]) & (np.maximum(n2q[left], n2q[right]) <= 1.25 * np.minimum(n2q[left], n2q[right]))  # equal qubits, 2q gates within 1.25x
     left, right = left[keep], right[keep]
     if len(left) == 0:
-        return {"status": "no pairs"}, []
+        return {"status": "no pairs"}
 
     # weights: comparable task 1 / (groups * pairs in group); matched workload a_i + a_j with a_i = 1 / (families * circuits in family * partners)
     if design == "comparable_task":
@@ -319,23 +287,18 @@ def evaluate(circuits: dict, metric: str, direction: int, target: str, design: s
            "n_circuits": len(set(left) | set(right)), "n_pairs": len(left), "n_untied_pairs": int(untied.sum()), "n_families": families_untied,
            "sparse": families_untied < 3, "_C": C[1:]}
     if not untied.any():
-        return row, []
+        return row
 
-    # gap response: metric percentile gap (tied midranks among the eligible circuits) against the signed relative cost gap
+    # proportionality P: weighted Spearman correlation between the metric gap (percentile distance of the two circuits) and the signed
+    # relative cost difference d_y of the untied pairs (same weights and bootstrap replicates as C)
     percentile = rankdata(s) / len(s)
-    g = np.abs(percentile[left] - percentile[right])[untied]
-    d = np.divide(y_worse - y_better, y_worse + y_better, out=np.zeros(len(left)), where=y_worse + y_better > 0)[untied]
-    w_untied = w[untied] / w[untied].sum()
-    profile = []
-    for b, gap_bin in enumerate(GAP_BINS):
-        inside = np.digitize(g, [1 / 3, 2 / 3]) == b
-        if not inside.any():
-            continue
-        profile.append({"gap_bin": gap_bin, "C": np.average(score[untied][inside], weights=w_untied[inside]),
-                        "median_signed_d": weighted_median(d[inside], w_untied[inside]), "median_abs_d": weighted_median(np.abs(d[inside]), w_untied[inside]),
-                        "n_pairs": int(inside.sum()), "n_families": len(set(family[left[untied][inside]]) | set(family[right[untied][inside]])),
-                        "_d": d[inside], "_w": w_untied[inside]})
-    return row, profile
+    g = rankdata(np.abs(percentile[left] - percentile[right])[untied])
+    d = rankdata(np.divide(y_worse - y_better, y_worse + y_better, out=np.zeros(len(left)), where=y_worse + y_better > 0)[untied])
+    V = W[:, untied] / W[:, untied].sum(axis=1, keepdims=True)
+    covariance = V @ (g * d) - (V @ g) * (V @ d)
+    P = covariance / np.sqrt((V @ g ** 2 - (V @ g) ** 2) * (V @ d ** 2 - (V @ d) ** 2))
+    row.update({"P": P[0], "P_lo": np.nanpercentile(P[1:], 2.5), "P_hi": np.nanpercentile(P[1:], 97.5), "_P": P[1:]})
+    return row
 
 
 def regret(s: np.ndarray, y: np.ndarray, left: np.ndarray, right: np.ndarray) -> np.ndarray:
@@ -343,12 +306,6 @@ def regret(s: np.ndarray, y: np.ndarray, left: np.ndarray, right: np.ndarray) ->
     low, high = np.minimum(y[left], y[right]), np.maximum(y[left], y[right])
     selected = np.where(np.isclose(s[left], s[right]), (y[left] + y[right]) / 2, np.where(s[left] < s[right], y[left], y[right]))
     return np.divide(selected - low, high, out=np.zeros(len(left)), where=high > 0)
-
-
-def weighted_median(x: np.ndarray, w: np.ndarray) -> float:
-    order = np.argsort(x)
-    cumulative = np.cumsum(w[order])
-    return float(x[order][np.searchsorted(cumulative, cumulative[-1] / 2)])
 
 
 def write_csv(file: Path, rows: list[dict]) -> None:
