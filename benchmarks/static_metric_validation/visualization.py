@@ -25,8 +25,8 @@ from scipy.stats import rankdata
 from benchmarks.common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY, MUTED, GRID, SERIES, REFERENCE, save
 
 COLUMNS = [("TI", "IonShuttler"), ("NA", "QMAP"), ("NA", "Bloqade"), ("SC", "QMAP"), ("SC", "SABRE")]
-DESIGNS = {"comparable_task": "comparable-task pairs (circuits for the same task and QEC code)",
-           "matched_workload": "matched-workload pairs (circuit with the same number of qubits, and roughly same number of 2q gates within 1.25x)"}
+DESIGNS = {"comparable_task": "comparable-task pairs (same QEC code and task)",
+           "matched_workload": "matched-workload pairs (equal qubits, 2q gates within 1.25x)"}
 DIVERGING = LinearSegmentedColormap.from_list("diverging", [REFERENCE, "#f6d3cf", "#f7f6f2", "#cfe0f5", SERIES])
 UNAVAILABLE = "#efeeea"
 
@@ -90,6 +90,43 @@ HYPOTHESES = {
     },
 }
 
+# short display names of the metrics in the plots
+LABELS = {
+    "critical_path_depth": "critical path depth",
+    "2q_depth": "2q depth",
+    "critical_path_duration": "critical path duration",
+    "parallelism_saturation": "parallelism saturation",
+    "capacity_constrained_depth_bound": "capacity depth bound",
+    "min_idle_steps": "min. idle steps",
+    "min_scheduling_window_congestion": "min. window congestion",
+    "max_scheduling_window_congestion": "max. window congestion",
+    "average_asap_qubit_reuse": "ASAP qubit reuse",
+    "average_alap_qubit_reuse": "ALAP qubit reuse",
+    "average_asap_qubit_interaction": "ASAP qubit interaction",
+    "nr_gates": "nr. gates",
+    "share_2q_gates": "share 2q gates",
+    "fraction_of_partner_capacity_exceeding_qubits": "capacity-exceeding qubits",
+    "weighted_fraction_of_partner_capacity_exceeding_qubits": "capacity-exceeding qubits (weighted)",
+    "fraction_of_effective_partner_capacity_exceeding_qubits": "eff. capacity-exceeding qubits",
+    "max_partner_capacity_ratio": "max. partner capacity ratio",
+    "average_interaction_partner_diversity": "partner diversity",
+    "average_interaction_entropy": "interaction entropy",
+    "average_effective_partner_number": "eff. partner number",
+    "interaction_concentration": "interaction concentration",
+    "statically_servable_interaction_fraction": "statically servable interactions",
+    "capacity_constrained_qubit_partition": "capacity qubit partition",
+    "non_bipartite_interaction_fraction": "non-bipartite interactions",
+    "nr_connected_components": "connected components",
+    "largest_component_fraction": "largest component",
+    "average_interaction_reuse_distance": "interaction reuse distance",
+    "share_partner_reusing_qubits": "partner-reusing qubits",
+    "capacity_constrained_reuse": "capacity reuse",
+    "partner_switching_frequency": "partner switching",
+    "zone_switching_frequency": "zone switching",
+    "_activity_imbalance": "activity imbalance",
+    "N_2q": "nr. 2q gates",
+}
+
 # ------------------------------------------------------------------------------------------------------------------------------------------------
 
 def visualize(results_dir: Path) -> None:
@@ -103,24 +140,23 @@ def visualize(results_dir: Path) -> None:
              "   - routing  = qubit moves (SC swaps, TI shuttles, NA atom transports)",
              "   - zones    = zone changes (TI interaction zones, NA functional zones)",
              "   - schedule = compiled schedule length",
-             "   - idle     = time qubits wait between their gates (in compiler timesteps)",
-             ""]
+             "   - idle     = time qubits wait between their gates (in compiler timesteps)"]
     # per plot: value, its neutral value and color range, file name, subtitle, color bar label, notes
     plots = [("C", 0.5, Normalize(0.25, 0.75), "scorecard",
               "Correlation: Comparing two circuits, does the static metric predict the right order of their actual runtime costs?",
               "weighted share of circuit pairs whose predicted-worse circuit actually costs more (0.5 = random)",
-              costs + ["bold: 95% CI excludes 0.5; hatched: fewer than 3 code families to compare"]),
+              [costs, ["bold: 95% CI excludes 0.5", "hatched: fewer than 3 code families to compare"]]),
              ("P", 0.0, Normalize(-1, 1), "proportionality",
               "Proportionality: Comparing two circuits, does a larger difference in the static metric correspond to a larger difference in runtime cost?",
               "weighted Spearman correlation between the metric difference of a pair and its signed cost difference " r"$\dfrac{y_{\mathrm{worse}} - y_{\mathrm{better}}}{y_{\mathrm{worse}} + y_{\mathrm{better}}}$" " (0 = no relation)",
-              costs + ["metric difference = distance of the two circuits in the metric's ranking",
+              [costs, ["metric difference = distance of the two circuits in the metric's ranking",
                        "signed cost difference > 0 if the predicted-worse circuit costs more",
-                       "hatched: fewer than 3 circuits to compare"])]
+                       "hatched: fewer than 3 circuits to compare"]])]
 
     for design, title in DESIGNS.items():
         cells = {(r["metric"], r["platform"], r["compiler"]): r for r in summary if r.get("design") in (design, None)}
         for value, neutral, norm, name, subtitle, label, notes in plots:
-            fig, ax = draw_rows(len(COLUMNS), f"Validation of static (runtime cost) metrics - {name} of {title}", subtitle)
+            fig, ax = draw_rows(len(COLUMNS))
             for x, (platform, compiler) in enumerate(COLUMNS):
                 ax.text(x + 0.5, -0.3, f"{platform}\n{compiler}", ha="center", va="bottom", color=TEXT, fontsize=8.5, fontweight="bold")
                 for y, metric in rows():
@@ -135,7 +171,7 @@ def visualize(results_dir: Path) -> None:
                     cell(ax, x, y, 1, DIVERGING(norm(row[value])), f"{row[value]:.2f}", "black", 7.5, bold=significant, hatch=row["sparse"])
                     if not row["sparse"]:
                         ax.text(x + 0.95, y + 0.85, str(row["n_families"]), ha="right", va="bottom", color=TEXT_SECONDARY, fontsize=5)
-            caption(fig, ax, norm, label, notes)
+            caption(fig, ax, norm, label, notes, f"Validation of static runtime-cost metrics: {name}, {title}", subtitle)
             save(fig, str(out_dir / f"{name}_{design}.png"))
     print(f"Saved plots to {out_dir}")
 
@@ -150,7 +186,7 @@ def rows() -> list[tuple[int, str]]:
     return result
 
 
-def draw_rows(width: float, title: str, subtitle: str):
+def draw_rows(width: float):
     """Figure with the representation headers and metric labels (with preferred direction) left of the cells."""
     fig, ax = plt.subplots(figsize=(3 + 1.6 * width, 0.27 * len(rows()) + 3), facecolor=SURFACE)
     y = 0
@@ -158,14 +194,12 @@ def draw_rows(width: float, title: str, subtitle: str):
         ax.text(-0.08, y + 0.6, representation, ha="right", va="center", color=TEXT, fontsize=8, fontweight="bold")
         ax.axhline(y + 0.98, color=GRID, linewidth=0.8)
         for i, (metric, (direction, _)) in enumerate(hypotheses.items()):
-            ax.text(-0.08, y + i + 1.5, f"{metric}  {'↓' if direction == 1 else '↑'}", ha="right", va="center", color=TEXT_SECONDARY, fontsize=7.5)
+            ax.text(-0.08, y + i + 1.5, f"{LABELS.get(metric, metric)}  {'↓' if direction == 1 else '↑'}", ha="right", va="center",
+                    color=TEXT_SECONDARY, fontsize=7.5)
         y += len(hypotheses) + 1
     ax.set_xlim(0, width)
     ax.set_ylim(y, 0)
     ax.axis("off")
-    ax.set_title(title, loc="left", color=TEXT, fontsize=11, fontweight="bold", pad=52)
-    ax.annotate(subtitle, xy=(0, 1), xycoords="axes fraction", xytext=(0, 36), textcoords="offset points", ha="left", va="bottom",
-                color=TEXT, fontsize=9, fontweight="bold")
     return fig, ax
 
 
@@ -175,12 +209,23 @@ def cell(ax, x: float, y: int, w: float, color, text: str, text_color: str, size
     ax.text(x + w / 2, y + 0.53, text, ha="center", va="center", color=text_color, fontsize=size, fontweight="bold" if bold else "normal")
 
 
-def caption(fig, ax, norm, label: str, notes: list[str]) -> None:
+def caption(fig, ax, norm, label: str, notes: list[list[str]], title: str, subtitle: str) -> None:
     colorbar = fig.colorbar(ScalarMappable(norm, DIVERGING), ax=ax, orientation="horizontal", fraction=0.012, pad=0.01, aspect=50)
     colorbar.outline.set_visible(False)
     colorbar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=7)
     colorbar.set_label(label, color=TEXT_SECONDARY, fontsize=7.5)
-    fig.text(0.02, colorbar.ax.get_position().y0 - 0.035, "\n".join(notes), color=MUTED, fontsize=7, va="top")
+    # two note blocks side by side below the color bar and its label, centered around it with a gap of 30 points (offsets in points)
+    for block, dx, ha in zip(notes, (-15, 15), ("right", "left")):
+        colorbar.ax.annotate("\n".join(block), xy=(0.5, 0), xycoords="axes fraction", xytext=(dx, -42), textcoords="offset points",
+                             ha=ha, va="top", multialignment="left", color=MUTED, fontsize=7, family="monospace")
+    # title and subtitle centered on the saved (cropped) png, i.e. on everything drawn so far (offsets in points above the column headers)
+    bbox = fig.get_tightbbox(fig.canvas.get_renderer())
+    axes = ax.get_position()  # in figure fraction (not affected by the tight cropping when saving)
+    x = ((bbox.x0 + bbox.x1) / 2 / fig.get_figwidth() - axes.x0) / axes.width
+    ax.annotate(title, xy=(x, 1), xycoords="axes fraction", xytext=(0, 64), textcoords="offset points", ha="center",
+                va="bottom", color=TEXT, fontsize=12, fontweight="bold")
+    ax.annotate(subtitle, xy=(x, 1), xycoords="axes fraction", xytext=(0, 42), textcoords="offset points", ha="center",
+                va="bottom", color=TEXT, fontsize=9, fontweight="bold")
 
 
 def summarize(results_dir: Path) -> list[dict]:
