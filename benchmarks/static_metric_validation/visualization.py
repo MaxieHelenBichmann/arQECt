@@ -1,5 +1,6 @@
 """Concordance, gap response and decision regret of the static metrics on circuit pairs (plan §4, §5), and their plots:
 F1 (validation scorecard: concordance C) and F2 (gap response: signed cost separation per metric gap bin).
+Only the runtime cost aspect is validated (hardware events of the compiled circuit), not the compilation cost (compiler work / freedom).
 
 Pairs: comparable task (circuits in the same data folder) and matched workload (equal qubits, similar number of 2q gates).
 Weights balance task groups / code families; uncertainty comes from resampling code families (first data folder level).
@@ -32,7 +33,18 @@ UNAVAILABLE = "#efeeea"
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------
-# hypotheses: per metric whether lower (1) or higher (-1) values are better, and the compiled cost it should predict/correspond to
+
+# targets: raw (aggregated, unnormalized) values associated with runtime cost of a compiled circuit
+TARGETS = {
+    "routing": {"TI": ["shuttles"], "NA": ["transports"], "SC": ["swaps"]}, # qubit movements
+    "zones": {"TI": ["interaction_zone_entry", "interaction_zone_eviction"], "NA": ["zone_changes"]}, # zone changes
+    "schedule": {"TI": ["schedule_length"], "NA": ["schedule_length"], "SC": ["schedule_length"]}, # schedule length
+    "idle": {"TI": ["idle_time"], "NA": ["idle_time"], "SC": ["idle_time"]},  # idle times
+}
+
+# hypotheses: per metric (that approximates runtime costs) whether lower (1) or higher (-1) values are better, and the cost it should predict/correspond to
+# runtime-cost metrics not evaluated: share_measurements, share_resets, share_mid_circuit_measurements (measurements / resets will not be changed during the compilation, so there is nothing to verify),
+# estimated_nr_gates_post_transpilation, estimated_nr_2q_gates_post_transpilation (utilized compilers do not support transpilations themselves)
 HYPOTHESES = {
     "Dependency DAG": {
         "critical_path_depth": (1, "schedule"),
@@ -41,9 +53,6 @@ HYPOTHESES = {
         "parallelism_saturation": (1, "schedule"),
         "capacity_constrained_depth_bound": (1, "schedule"),
         "min_idle_steps": (1, "idle"),
-        "average_scheduling_slack": (-1, "schedule"),
-        "average_weighted_scheduling_slack": (-1, "schedule"),
-        "no_slack_fraction": (1, "schedule"),
         "min_scheduling_window_congestion": (1, "schedule"),
         "max_scheduling_window_congestion": (1, "schedule"),
         "average_asap_qubit_reuse": (-1, "idle"),
@@ -53,8 +62,6 @@ HYPOTHESES = {
     "Gate distribution": {
         "nr_gates": (1, "schedule"),
         "share_2q_gates": (1, "routing"),
-        "share_measurements": (1, "readout"),
-        "share_resets": (1, "readout"),
     },
     "Weighted interaction graph": {
         "fraction_of_partner_capacity_exceeding_qubits": (1, "routing"),
@@ -77,20 +84,11 @@ HYPOTHESES = {
         "capacity_constrained_reuse": (-1, "routing"),
         "partner_switching_frequency": (1, "routing"),
         "zone_switching_frequency": (1, "zones"),
-        "share_mid_circuit_measurements": (1, "readout"),
         "_activity_imbalance": (1, "schedule"),
-    },
-    "Native translation (deferred)": {
-        "share_native_gates": (-1, "native"),
-        "share_native_2q_gates": (-1, "native"),
-        "estimated_nr_gates_post_transpilation": (1, "native"),
-        "estimated_nr_2q_gates_post_transpilation": (1, "native"),
-        "_average_1q_run_length": (-1, "native"),
     },
     "Workload baselines": {
         "num_qubits": (1, "routing"),
         "N_2q": (1, "routing"),
-        "N_gate": (1, "routing"),
     },
 }
 
@@ -124,7 +122,9 @@ def visualize(results_dir: Path) -> None:
                      bold=significant, hatch=row["sparse"])
                 ax.text(x + 0.95, y + 0.85, str(row["n_families"]), ha="right", va="bottom", color=TEXT_SECONDARY, fontsize=5)
         caption(fig, ax, norm, "C: weighted share of metric-untied pairs whose predicted-worse circuit costs more (0.5 = random)", [
-            "Costs: routing = moves per input 2q gate (SC swaps, TI shuttles, NA atom transports); zones = zone changes per qubit operation.",
+            "Only runtime cost metrics are validated (against hardware events of the compiled circuit); compilation cost metrics are excluded.",
+            "Costs (totals per compiled circuit, not normalized): routing = qubit moves (SC swaps, TI shuttles, NA atom transports); zones = zone changes;",
+            "schedule = compiled schedule length, idle = time qubits wait between their gates (both in compiler timesteps).",
             "Bold: family-bootstrap 95% CI excludes 0.5. Small number: code families with untied pairs; hatched: fewer than 3.",
             "Grey: no estimate (cost not measured by the compilation wrappers, all pairs tied, or no pairs)."])
         save(fig, str(out_dir / f"f1_scorecard_{design}.png"))
@@ -151,6 +151,7 @@ def visualize(results_dir: Path) -> None:
                     cell(ax, g * width + b * 0.6, y, 0.6, DIVERGING(norm(float(gap["median_signed_d"]))), f"{float(gap['median_abs_d']):.2f}",
                          MUTED if sparse else TEXT, 6, hatch=sparse)
         caption(fig, ax, norm, "median signed separation d_y = (y_worse - y_better) / (y_worse + y_better) of the predicted pair (1/3 = twice the cost)", [
+            "Only runtime cost metrics are validated (against hardware events of the compiled circuit); compilation cost metrics are excluded.",
             "Bins: metric percentile gap of the two circuits (small < 1/3 <= medium < 2/3 <= large); all metric-untied pairs incl. reversals.",
             "Number: median |d_y|, i.e. whether physical differences grow with the metric gap. Hatched: fewer than 3 families; '–': empty bin."])
         save(fig, str(out_dir / f"f2_gap_response_{design}.png"))
@@ -202,15 +203,17 @@ def summarize(results_dir: Path) -> tuple[list[dict], list[dict]]:
     """Per config / compiler and per platform / compiler (configs with equal weight): C, decisiveness and regret of every metric
     (summary), and its gap-response profile (gaps), read from the raw results."""
     warnings.simplefilter("ignore", RuntimeWarning)  # empty bootstrap replicates are expected
-    strata = defaultdict(dict)  # (platform, config, compiler) -> circuit -> {group, family, metrics, workload, compiled targets}
+    strata = defaultdict(dict)  # (platform, config, compiler) -> circuit -> {group, family, structural metrics, compiled values, targets}
     for file in sorted((results_dir / "raw").glob("*/*.csv")):
         with file.open(newline="") as f:
             rows = list(csv.DictReader(f))
-        values = {row["metric"]: row["value"] for row in rows}
-        if values["status"] in ("success", "reused"):
-            strata[(rows[0]["platform"], rows[0]["config"], rows[0]["compiler"])][rows[0]["circuit"]] = {
-                "group": rows[0]["group"], "family": rows[0]["group"].split("/")[0], "num_qubits": int(rows[0]["num_qubits"]),
-                **{row["metric"]: None if row["value"] == "" else float(row["value"]) for row in rows if row["source"] != "run"}}
+        platform = rows[0]["platform"]
+        circuit = {"group": rows[0]["group"], "family": rows[0]["group"].split("/")[0], "num_qubits": int(rows[0]["num_qubits"]),
+                   "N_2q": int(rows[0]["N_2q"]), **{row["metric"]: None if row["value"] == "" else float(row["value"]) for row in rows}}
+        for target, values in TARGETS.items():
+            if platform in values and all(value in circuit for value in values[platform]):
+                circuit[target] = sum(circuit[value] for value in values[platform])
+        strata[(platform, rows[0]["config"], rows[0]["compiler"])][rows[0]["circuit"]] = circuit
 
     families = sorted({c["family"] for circuits in strata.values() for c in circuits.values()})
     rng = np.random.default_rng(0)
@@ -266,7 +269,7 @@ def summarize(results_dir: Path) -> tuple[list[dict], list[dict]]:
 
 def evaluate(circuits: dict, metric: str, direction: int, target: str, design: str, multiplicity: dict) -> tuple[dict, list]:
     """Concordance C, decisiveness and relative regret (with family-bootstrap CI) and the gap-response profile of one metric on one pair set."""
-    names = [n for n, c in circuits.items() if c[metric] is not None and c[target] is not None]
+    names = [n for n, c in circuits.items() if c[metric] is not None and c.get(target) is not None]
     if metric in ("average_interaction_reuse_distance", "capacity_constrained_reuse"):  # 0 means "no partner reuse", not the best value
         names = [n for n in names if circuits[n]["share_partner_reusing_qubits"] > 0]
     group = np.array([circuits[n]["group"] for n in names])

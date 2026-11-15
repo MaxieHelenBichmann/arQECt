@@ -33,7 +33,7 @@ from bloqade.lanes.analysis.atom import AtomInterpreter
 from mqt.ionshuttler.linear import (
     Architecture as TIArchitecture, LinearCompiler, CompilationStatus, LinearCompilerConfig, SearchConfig
 )
-from mqt.ionshuttler.linear.actions import Shuttle, PhysicalSwap, Rx, Rzz
+from mqt.ionshuttler.linear.actions import Shuttle, PhysicalSwap, Rx, Rzz, AdvanceTime, GateAction, SingleQubitGate
 from mqt.ionshuttler.multi_shuttler.main import main as ms_main
 from mqt.ionshuttler.multi_shuttler.outside import shuttle as ms_shuttle
 
@@ -85,7 +85,16 @@ def run_ti_mqt_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, 
         # 3.) extract events by replaying schedule
         shuttles: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> number of shuttles of that qubit there
         swaps: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> number of swaps that qubit took part in there
+        now, schedule_length, idle_time = 0, 0, 0  # current timestep, end of the last operation, timesteps ions wait between their gates
+        gate_end: dict[int, int] = {}  # ion -> timestep its last gate ended
         for action in result.path:
+            if isinstance(action, AdvanceTime):
+                now += 1
+            elif isinstance(action, GateAction):
+                for ion in [action.ion] if isinstance(action, SingleQubitGate) else [action.ion_a, action.ion_b]:
+                    idle_time += max(now - gate_end.get(ion, now), 0)
+                    gate_end[ion] = now + getattr(action, "duration", 0)
+            schedule_length = max(schedule_length, now + getattr(action, "duration", 0))
             if isinstance(action, Shuttle):
                 moves = [(action.ion, action.src, action.dst)]
                 shuttles[(action.ion, qubit_steps[action.ion])] += 1
@@ -110,6 +119,8 @@ def run_ti_mqt_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, 
         details = {
             "shuttles": dict(sorted(shuttles.items())),  # (qubit, completed anchors) -> nr of single-site moves of that qubit there
             "swaps": dict(sorted(swaps.items())),  # (qubit, completed anchors) -> nr of swaps that qubit took part in there (each swap appears for both ions)
+            "schedule_length": schedule_length,  # compiler timesteps until the last operation ends
+            "idle_time": idle_time,  # timesteps the ions wait between consecutive gates (incl. their transport)
             "wall_clock_s": result.wall_clock_s,
         }
 
@@ -155,10 +166,15 @@ def run_ti_mqt_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, 
             return nx.shortest_path_length(edge_graph, a if a in edge_graph else a[::-1], b if b in edge_graph else b[::-1])
         positions = dict(timeline[0][2])
         shuttles = Counter()  # (qubit, completed anchors) -> number of single-edge moves of that qubit there
+        now, idle_time = 0, 0  # current timestep, timesteps ions wait between their gates
+        gate_end: dict[int, int] = {}  # ion -> timestep its last gate ended
         for kind, _, data in timeline:
             if kind == "gates":
                 for gate_id in data:
                     qubits = graph.gate_info[gate_id].qubits
+                    for qubit in qubits:
+                        idle_time += max(now - 1 - gate_end.get(qubit, now - 1), 0)
+                        gate_end[qubit] = now
                     if len(qubits) == 2 or graph.gate_info[gate_id].qasm.startswith("rx"):
                         for qubit in qubits:
                             qubit_steps[qubit] += 1
@@ -171,10 +187,13 @@ def run_ti_mqt_compiler(hardware: TIArchitecture | dict, circuit: stim.Circuit, 
                     if edge in zone_edges:
                         hardware_events.interaction_zone_entry.append((ion, qubit_steps[ion]))
             positions = dict(data)
+            now += 1
 
         details = {
             "shuttles": dict(sorted(shuttles.items())),  # (qubit, completed anchors) -> nr of single-edge moves of that qubit there (incl. being pushed along by a rotation)
             "swaps": {},  # multi_shuttler has no explicit swap operation (blocking ions are pushed along by rotating cycles, counted as shuttles)
+            "schedule_length": now,  # timesteps of the multi_shuttler schedule
+            "idle_time": idle_time,  # timesteps the ions wait between consecutive gates (incl. their transport)
             "wall_clock_s": wall_clock_s,
         }
 
@@ -256,7 +275,12 @@ def run_na_mqt_compiler(hardware: ZonedNeutralAtomArchitecture, circuit: stim.Ci
     positions: dict[int, tuple[float, float]] = {}
     picked_up_at: dict[int, tuple[float, float]] = {}  # atoms currently in the AOD -> where they were picked up
     rearrangement_jobs = 0
+    now, idle_time = 0, 0  # current step (one per NAViz statement, executed sequentially), steps atoms wait between their gates
+    gate_step: dict[int, int] = {}  # atom -> step of its last gate (cz, rz or u)
     for op, targets, statement in instructions:
+        if op != "atom":
+            now += 1
+        gate_atoms = []
         if op == "atom":
             positions.update(targets)
         elif op == "load":
@@ -286,9 +310,16 @@ def run_na_mqt_compiler(hardware: ZonedNeutralAtomArchitecture, circuit: stim.Ci
             for atom, site in stored.items():
                 if occupancy[site] == 2:
                     qubit_steps[atom] += 1
-        elif op == "rz": 
+                    gate_atoms.append(atom)
+        elif op == "rz":
             for atom, _ in targets:
                 qubit_steps[atom] += 1
+                gate_atoms.append(atom)
+        elif op == "u":  # 1q gate
+            gate_atoms = [atom for atom, _ in targets]
+        for atom in gate_atoms:
+            idle_time += now - gate_step.get(atom, now - 1) - 1
+            gate_step[atom] = now
 
     expected_steps = Counter(t.value for op in circuit for group in op.target_groups() for t in group
                              if stim.gate_data(op.name).is_two_qubit_gate or stim.gate_data(op.name).produces_measurements
@@ -303,6 +334,8 @@ def run_na_mqt_compiler(hardware: ZonedNeutralAtomArchitecture, circuit: stim.Ci
         "storage_moves": dict(sorted(storage_moves.items())),  # ... of which within the storage zone (rearrangements)
         "move_distance": dict(sorted(move_distance.items())),  # (qubit, completed anchors) -> distance (um) the atom travelled there
         "rearrangement_jobs": rearrangement_jobs,  # parallel AOD jobs (all atoms moved together count once)
+        "schedule_length": now,  # NAViz statements (load / move / store / gates, each one sequential step)
+        "idle_time": idle_time,  # steps the atoms wait between consecutive gates (incl. their transport)
         "wall_clock_s": wall_clock_s,
     }
     return hardware_events, details
@@ -360,11 +393,11 @@ def run_na_bloqade_compiler(hardware: dict, circuit: stim.Circuit, max_compile_t
                 elif isinstance(statement, move.CZ):
                     controls, targets, _ = frame.get(statement.result).data.get_qubit_pairing(statement.zone_address, architecture)
                     instructions.append(("anchor", [*controls, *targets]))
-                elif isinstance(statement, (move.LocalRz, move.GlobalRz)):
+                elif isinstance(statement, (move.LocalRz, move.GlobalRz, move.LocalR, move.GlobalR)):  # Rz = anchor, R = 1q gate
                     state = frame.get(statement.result).data
-                    atoms = list(state.qubit_to_locations) if isinstance(statement, move.GlobalRz) else [
+                    atoms = list(state.qubit_to_locations) if isinstance(statement, (move.GlobalRz, move.GlobalR)) else [
                         state.locations_to_qubit[loc] for loc in statement.location_addresses]
-                    instructions.append(("anchor", atoms))
+                    instructions.append(("anchor" if isinstance(statement, (move.LocalRz, move.GlobalRz)) else "gate", atoms))
             connection.send(instructions)
         except Exception as error:
             connection.send(RuntimeError(str(error)))
@@ -409,12 +442,19 @@ def run_na_bloqade_compiler(hardware: dict, circuit: stim.Circuit, max_compile_t
                 hardware_events.inter_entanglement.append((atom, qubit_steps[atom]))
         journey_start.clear()
     current: dict[int, int] = {}  # atom -> current word
+    now, idle_time = 0, 0  # current step (one per traced move / gate statement, executed sequentially), steps atoms wait between their gates
+    gate_step: dict[int, int] = {}  # atom -> step of its last gate (cz, rz or r)
     for op, targets in instructions:
+        now += 1
+        if op in ("anchor", "gate"):
+            for atom in targets:
+                idle_time += now - gate_step.get(atom, now - 1) - 1
+                gate_step[atom] = now
         if op == "anchor":
             end_journeys()
             for atom in targets:
                 qubit_steps[atom] += 1
-        else:
+        elif op == "move":
             rearrangement_jobs += 1
             for atom, begin, end in targets:
                 journey_start.setdefault(atom, begin)
@@ -445,6 +485,8 @@ def run_na_bloqade_compiler(hardware: dict, circuit: stim.Circuit, max_compile_t
         "storage_moves": dict(sorted(storage_moves.items())),
         "move_distance": dict(sorted(move_distance.items())),
         "rearrangement_jobs": rearrangement_jobs,
+        "schedule_length": now,  # traced statements (moves / gates, each one sequential step)
+        "idle_time": idle_time,  # steps the atoms wait between consecutive gates (incl. their transport)
         "wall_clock_s": wall_clock_s,
     }
     return hardware_events, details
@@ -497,9 +539,17 @@ def run_sc_mqt_compiler(hardware: SCArchitecture, circuit: stim.Circuit, max_com
     hardware_events = SuperconductingQubitsHardwareEvents()
     qubit_steps: defaultdict[int, int] = defaultdict(int)  # qubit -> number of completed anchor operations
     swaps: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> number of swaps that qubit took part in there
+    layer_end: defaultdict[int, int] = defaultdict(int)  # physical qubit -> last layer it is busy
+    gate_layer: dict[int, int] = {}  # circuit qubit -> layer of its last original operation
+    idle_time = 0  # layers the circuit qubits wait between their original operations (incl. swaps moving them)
     for op in mapped:
         physicals = [ctl.qubit for ctl in op.controls] + list(op.targets)
         qubits = [layout[p] for p in physicals]
+        layer = max(layer_end[p] for p in physicals) + 1
+        layer_end.update((p, layer) for p in physicals)
+        if not op.type_ == OpType.swap:
+            idle_time += sum(layer - gate_layer.get(qubit, layer - 1) - 1 for qubit in qubits)
+            gate_layer.update((qubit, layer) for qubit in qubits)
         if op.type_ == OpType.swap:
             hardware_events.virtual_swap.append(((qubits[0], qubit_steps[qubits[0]]), (qubits[1], qubit_steps[qubits[1]])))
             swaps.update((qubit, qubit_steps[qubit]) for qubit in qubits)
@@ -518,6 +568,8 @@ def run_sc_mqt_compiler(hardware: SCArchitecture, circuit: stim.Circuit, max_com
 
     details = {
         "swaps": dict(sorted(swaps.items())),  # (qubit, completed anchors) -> nr of swaps that qubit took part in there (each swap appears for both qubits)
+        "schedule_length": max(layer_end.values(), default=0),  # layers of the mapped circuit (unit time per operation, swaps included)
+        "idle_time": idle_time,  # layers the circuit qubits wait between consecutive original operations
         "wall_clock_s": wall_clock_s,
     }
     return hardware_events, details
@@ -550,9 +602,17 @@ def run_sc_sabre_compiler(hardware: CouplingMap, circuit: stim.Circuit, max_comp
     hardware_events = SuperconductingQubitsHardwareEvents()
     qubit_steps: defaultdict[int, int] = defaultdict(int)  # qubit -> number of completed anchor operations
     swaps: Counter[tuple[int, int]] = Counter()  # (qubit, completed anchors) -> number of swaps that qubit took part in there
+    layer_end: defaultdict[int, int] = defaultdict(int)  # physical qubit -> last layer it is busy
+    gate_layer: dict[int, int] = {}  # circuit qubit -> layer of its last original operation
+    idle_time = 0  # layers the circuit qubits wait between their original operations (incl. swaps moving them)
     for instruction in mapped.data:
         physicals = [mapped.find_bit(q).index for q in instruction.qubits]
         qubits = [layout[p] for p in physicals]
+        layer = max(layer_end[p] for p in physicals) + 1
+        layer_end.update((p, layer) for p in physicals)
+        if not instruction.operation.name == "swap":
+            idle_time += sum(layer - gate_layer.get(qubit, layer - 1) - 1 for qubit in qubits)
+            gate_layer.update((qubit, layer) for qubit in qubits)
         if instruction.operation.name == "swap":
             hardware_events.virtual_swap.append(((qubits[0], qubit_steps[qubits[0]]), (qubits[1], qubit_steps[qubits[1]])))
             swaps.update((qubit, qubit_steps[qubit]) for qubit in qubits)
@@ -571,6 +631,8 @@ def run_sc_sabre_compiler(hardware: CouplingMap, circuit: stim.Circuit, max_comp
 
     details = {
         "swaps": dict(sorted(swaps.items())),  # (qubit, completed anchors) -> nr of swaps that qubit took part in there (each swap appears for both qubits)
+        "schedule_length": max(layer_end.values(), default=0),  # layers of the mapped circuit (unit time per operation, swaps included)
+        "idle_time": idle_time,  # layers the circuit qubits wait between consecutive original operations
         "wall_clock_s": wall_clock_s,
     }
     return hardware_events, details
