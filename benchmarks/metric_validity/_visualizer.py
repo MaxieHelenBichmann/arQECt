@@ -46,15 +46,13 @@ LABELS = {
     "average_interaction_partner_diversity": "partner diversity",
     "average_interaction_entropy": "interaction entropy",
     "average_effective_partner_number": "eff. partner number",
-    "interaction_concentration": "interaction concentration",
     "statically_servable_interaction_fraction": "statically servable interactions",
     "capacity_constrained_qubit_partition": "capacity qubit partition",
     "non_bipartite_interaction_fraction": "non-bipartite interactions",
     "average_interaction_reuse_distance": "interaction reuse distance",
-    "share_partner_reusing_qubits": "partner-reusing qubits",
     "capacity_constrained_reuse": "capacity reuse",
-    "partner_switching_frequency": "partner switching",
-    "zone_switching_frequency": "zone switching",
+    "partner_switches_per_qubit": "partner switches / qubit",
+    "capacity_constrained_partner_switches_per_qubit": "partner switches / qubit (capacity)",
     "_activity_imbalance": "activity imbalance",
     "N_2q": "nr. 2q gates",
 }
@@ -69,7 +67,6 @@ def visualize(results_dir: Path) -> None:
 
     costs = ["Runtime costs (aggregated per compiled circuit, not normalized):",
              "   - routing  = qubit moves (SC swaps, TI shuttles, NA atom transports)",
-             "   - zones    = zone changes (TI interaction zones, NA functional zones)",
              "   - schedule = compiled schedule length",
              "   - idle     = time qubits wait between their gates (in compiler timesteps)"]
     # per plot: value, its neutral value and color range, file name, subtitle, color bar label, notes

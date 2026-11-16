@@ -19,7 +19,6 @@ from scipy.stats import rankdata
 # targets: raw (aggregated, unnormalized) values associated with runtime cost of a compiled circuit
 TARGETS = {
     "routing": {"TI": ["shuttles"], "NA": ["transports"], "SC": ["swaps"]}, # qubit movements
-    "zones": {"TI": ["interaction_zone_entry", "interaction_zone_eviction"], "NA": ["zone_changes"]}, # zone changes
     "schedule": {"TI": ["schedule_length"], "NA": ["schedule_length"], "SC": ["schedule_length"]}, # schedule length
     "idle": {"TI": ["idle_time"], "NA": ["idle_time"], "SC": ["idle_time"]},  # idle times
 }
@@ -53,17 +52,15 @@ HYPOTHESES = {
         "average_interaction_partner_diversity": (1, "routing"),
         "average_interaction_entropy": (1, "routing"),
         "average_effective_partner_number": (1, "routing"),
-        "interaction_concentration": (-1, "routing"),
         "statically_servable_interaction_fraction": (-1, "routing"),
         "capacity_constrained_qubit_partition": (1, "routing"),
         "non_bipartite_interaction_fraction": (1, "routing"),
     },
     "Qubit timelines": {
         "average_interaction_reuse_distance": (1, "routing"),
-        "share_partner_reusing_qubits": (-1, "routing"),
         "capacity_constrained_reuse": (-1, "routing"),
-        "partner_switching_frequency": (1, "routing"),
-        "zone_switching_frequency": (1, "zones"),
+        "partner_switches_per_qubit": (1, "routing"),
+        "capacity_constrained_partner_switches_per_qubit": (1, "routing"),
         "_activity_imbalance": (1, "schedule"),
     },
     "Workload baselines": {
@@ -133,7 +130,7 @@ def evaluate(circuits: dict, metric: str, direction: int, target: str, design: s
     """Concordance C, proportionality P (both with family-bootstrap CI), decisiveness and relative regret of one metric on one pair set."""
     names = [n for n, c in circuits.items() if c[metric] is not None and c.get(target) is not None]
     if metric in ("average_interaction_reuse_distance", "capacity_constrained_reuse"):  # 0 means "no partner reuse", not the best value
-        names = [n for n in names if circuits[n]["share_partner_reusing_qubits"] > 0]
+        names = [n for n in names if circuits[n]["average_interaction_reuse_distance"] > 0]
     group = np.array([circuits[n]["group"] for n in names])
     family = np.array([circuits[n]["family"] for n in names])
     s = direction * np.array([circuits[n][metric] for n in names], dtype=float)  # oriented: larger predicts worse
