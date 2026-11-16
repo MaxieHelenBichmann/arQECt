@@ -22,10 +22,8 @@ class QubitTimelinesAnalyzer(MetricExtractor):
 
         # reuse metrics
         result["average_interaction_reuse_distance"] = self._average_interaction_reuse_distance()
-        result["share_partner_reusing_qubits"] = self._share_partner_reusing_qubits()
         result["capacity_constrained_reuse"] = self._capacity_constrained_reuse()
-        result["partner_switching_frequency"] = self._partner_switching_frequency()
-        result["zone_switching_frequency"] = self._zone_switching_frequency()
+        result["partner_switches_per_qubit"], result["capacity_constrained_partner_switches_per_qubit"] = self._partner_switches_per_qubit()
 
         # composition
         result["share_mid_circuit_measurements"] = self._share_mid_circuit_measurements()
@@ -48,15 +46,6 @@ class QubitTimelinesAnalyzer(MetricExtractor):
             if gaps:
                 averages.append(sum(gaps) / len(gaps))
         return sum(averages) / len(averages) if averages else 0.0
-
-    def _share_partner_reusing_qubits(self) -> float:
-        """Fraction of interacting qubits that interact with some partner more than once.
-
-        Range [0, 1], 0 if no qubit interacts. Higher = more interaction locality to exploit.
-        """
-        partners = [[gate.partner for gate in timeline if gate.partner is not None] for timeline in self.qtl.timelines.values()]
-        interacting = [p for p in partners if p]
-        return sum(len(set(p)) < len(p) for p in interacting) / len(interacting) if interacting else 0.0
 
     def _capacity_constrained_reuse(self) -> float:
         """Fraction of partner reuses that fit the qubit's local capacity, i.e. that have the potential to be reused on the hardware. ( 1 - capacity_constrained_reuse ) are the theoretical reuses that cannot be exploited because of hardware constraints.
@@ -86,38 +75,38 @@ class QubitTimelinesAnalyzer(MetricExtractor):
                 last_seen[gate.partner] = i
         return fits / reuses if reuses else 0.0
 
-    def _partner_switching_frequency(self) -> float:
-        """Fraction of consecutive 2q gates on a qubit (ignoring 1q gates in between) whose partner differs from the previous one.
+    def _partner_switches_per_qubit(self) -> tuple[float, float]:
+        """Number of two-sided partner switches per interacting qubit.
 
-        Range [0, 1], 0 if no qubit has two 2q gates. Lower is better.
+        Range [0, 2 * nr_2q_gates / nr_interacting_qubits) each, 0 if no qubit has two 2q gates. Lower is better.
         """
-        switches, transitions = 0, 0
-        for timeline in self.qtl.timelines.values():
-            partners = [gate.partner for gate in timeline if gate.partner is not None]
-            switches += sum(a != b for a, b in zip(partners, partners[1:]))
-            transitions += max(len(partners) - 1, 0)
-        return switches / transitions if transitions else 0.0
-
-    def _zone_switching_frequency(self) -> float | None:
-        """Fraction of operations that require the qubit to necessarily change zones.
-
-        Range [0, 1]. Lower is better.
-        """
-        switches, operations = 0, 0
-        if isinstance(self.hw, NeutralAtomsModel):
-            for timeline in self.qtl.timelines.values():
-                kind = "SN"
-                for gate in timeline:
-                    switches += gate.kind != kind
-                    kind = gate.kind
-                operations += len(timeline)
-        elif isinstance(self.hw, TrappedIonsModel):
-            for timeline in self.qtl.timelines.values():
-                switches += 1
-                operations += len(timeline)
+        if isinstance(self.hw, TrappedIonsModel):
+            local_capacity = self.hw.interaction_zone_capacity - 1
+        elif isinstance(self.hw, NeutralAtomsModel):
+            local_capacity = 1
         else:
-            return None
-        return switches / operations if operations else 0.0
+            local_capacity = sum(deg * n for deg, n in self.hw.topology.items()) / sum(self.hw.topology.values())
+
+        partners = {q: [gate.partner for gate in timeline if gate.partner is not None] for q, timeline in self.qtl.timelines.items()}
+        meetings = {q: defaultdict(list) for q in partners}  # qubit -> partner -> positions of their meetings in the qubit's partner list
+        for q, p in partners.items():
+            for i, partner in enumerate(p):
+                meetings[q][partner].append(i)
+
+        switches, capacity_switches = 0, 0
+        for a, p in partners.items():
+            for k in range(1, len(p)):
+                b = p[k]
+                m = meetings[a][b].index(k)
+                if m == 0:  # first meeting of the pair
+                    between = float("inf")
+                else:  # distinct other partners in between, worse of both sides
+                    ib = meetings[b][a]
+                    between = max(len(set(p[meetings[a][b][m - 1] + 1 : k])), len(set(partners[b][ib[m - 1] + 1 : ib[m]])))
+                switches += between > 0
+                capacity_switches += between >= local_capacity
+        interacting = sum(1 for p in partners.values() if p)
+        return (switches / interacting, capacity_switches / interacting) if interacting else (0.0, 0.0)
 
     def _share_mid_circuit_measurements(self) -> float:
         """Fraction of measurements that are followed by further operations on the same qubit.

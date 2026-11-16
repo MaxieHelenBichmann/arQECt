@@ -23,7 +23,7 @@ class InteractionGraphAnalyzer(MetricExtractor):
             for key in ["fraction_of_partner_capacity_exceeding_qubits", "weighted_fraction_of_partner_capacity_exceeding_qubits",
                         "fraction_of_effective_partner_capacity_exceeding_qubits", "max_partner_capacity_ratio",
                         "average_interaction_partner_diversity", "average_interaction_entropy", "average_effective_partner_number",
-                        "interaction_concentration", "statically_servable_interaction_fraction", "capacity_constrained_qubit_partition",
+                        "statically_servable_interaction_fraction", "capacity_constrained_qubit_partition",
                         "non_bipartite_interaction_fraction"]:
                 result[key] = None
             return result
@@ -37,7 +37,6 @@ class InteractionGraphAnalyzer(MetricExtractor):
         # interaction spread
         result["average_interaction_partner_diversity"] = self._average_interaction_partner_diversity()
         result["average_interaction_entropy"], result["average_effective_partner_number"] = self._average_interaction_entropy()
-        result["interaction_concentration"] = self._interaction_concentration()
 
         # global structure vs. hardware
         result["statically_servable_interaction_fraction"] = self._statically_servable_interaction_fraction()
@@ -129,14 +128,6 @@ class InteractionGraphAnalyzer(MetricExtractor):
             total = sum(neighbors.values())
             entropy.append(-sum(w / total * math.log2(w / total) for w in neighbors.values()))
         return sum(entropy) / len(entropy), sum(2**H for H in entropy) / len(entropy)
-
-    def _interaction_concentration(self) -> float:
-        """Mean number of 2q gates per interacting qubit pair (interaction reuse).
-
-        Range [1, inf). Higher is usually better.
-        """
-        weights = [w for a, neighbors in self.wig.graph.items() for b, w in neighbors.items() if a < b]
-        return sum(weights) / len(weights)
 
     def _statically_servable_interaction_fraction(self) -> float:
         """Fraction of the interaction weight that can be served by a static assignment of local partners, respecting the capacity of both qubits.
