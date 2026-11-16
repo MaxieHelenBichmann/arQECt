@@ -10,8 +10,10 @@ if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
 
 class EncoderCircuitAnalyzer(MetricExtractor):
-    def __init__(self, hardware: HardwareModel):
+    def __init__(self, hardware: HardwareModel, stabilizers: list[str], logical_operators: list[str]):
         self.hw = hardware
+        self.stabilizers = stabilizers
+        self.logical_operators = logical_operators
 
     def analyze(self) -> dict[str, object]:
         return {}

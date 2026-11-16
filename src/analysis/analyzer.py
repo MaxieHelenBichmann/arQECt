@@ -5,7 +5,8 @@ from __future__ import annotations
 import stim
 
 from typing import TYPE_CHECKING
-from src.analysis import CircuitFunction, MetricExtractor
+from src.circuits.circuit import CircuitFunction
+from src.analysis import MetricExtractor
 from src.structure import GateDistribution, InteractionGraph, DependencyDAG, QubitTimelines
 from src.analysis.processor import CircuitProcessor
 from src.analysis.efficiency.dag import DependencyDAGAnalyzer
@@ -16,6 +17,7 @@ from src.analysis.quality.encoder import EncoderCircuitAnalyzer
 from src.analysis.quality.state_prep import StatePreparationCircuitAnalyzer
 from src.analysis.quality.syndrome_extract import SyndromeExtractionAnalyzer
 from dataclasses import dataclass
+from src.circuits.circuit import QECCircuit
 
 if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
@@ -33,7 +35,7 @@ class CircuitAnalyzer:
             self.hardware = hardware
             
 
-        def analyze(self, circuit: stim.Circuit, function: CircuitFunction) -> CircuitAnalysisResult:
+        def analyze(self, circuit: QECCircuit) -> CircuitAnalysisResult:
             """Analyze static and dynamic circuit properties dependent on the hardware."""
             dag = DependencyDAG()
             gd = GateDistribution()
@@ -42,7 +44,7 @@ class CircuitAnalyzer:
             
             # 1.) Process the circuit (execute it abstractly or build a relevant representation)
             processor = CircuitProcessor(dag, gd, wig, qtl, self.hardware)
-            processor.run(circuit=circuit)
+            processor.run(circuit=circuit.circuit)
 
             # 2.) Extract the metrics
             efficiency_analyzer : list[MetricExtractor] = [
@@ -60,13 +62,13 @@ class CircuitAnalyzer:
                 runtime_cost.update(result["runtime"])
 
 
-            match function:
+            match circuit.function:
                 case "StatePrep": 
-                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware) ]
+                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators) ]
                 case "Encoding": 
-                    quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware) ]
+                    quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators) ]
                 case "Syndrome": 
-                    quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware) ]
+                    quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators) ]
                 case _:
                     quality_analyzer = []
 
