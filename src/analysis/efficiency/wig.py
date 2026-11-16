@@ -17,7 +17,8 @@ class InteractionGraphAnalyzer(MetricExtractor):
         self.hw = hardware
 
     def analyze(self) -> dict[str, object]: # assume valid hardware parameters (especially capacities >0, SC topology has at least as many qubits as the wig), symmetric wig
-        result: dict[str, object] = {}
+        runtime_result : dict[str, object] = {}
+        compilation_result : dict[str, object] = {}
 
         if len(self.wig.graph) == 0: # no 2q gates -> metrics undefined
             for key in ["fraction_of_partner_capacity_exceeding_qubits", "weighted_fraction_of_partner_capacity_exceeding_qubits",
@@ -25,24 +26,24 @@ class InteractionGraphAnalyzer(MetricExtractor):
                         "average_interaction_partner_diversity", "average_interaction_entropy", "average_effective_partner_number",
                         "statically_servable_interaction_fraction", "capacity_constrained_qubit_partition",
                         "non_bipartite_interaction_fraction"]:
-                result[key] = None
-            return result
+                runtime_result[key] = None
+            return {"runtime": runtime_result, "compilation": compilation_result}
 
         # partner capacity
-        result["fraction_of_partner_capacity_exceeding_qubits"] = self._fraction_of_partner_capacity_exceeding_qubits()
-        result["weighted_fraction_of_partner_capacity_exceeding_qubits"] = self._weighted_fraction_of_partner_capacity_exceeding_qubits()
-        result["fraction_of_effective_partner_capacity_exceeding_qubits"] = self._fraction_of_effective_partner_capacity_exceeding_qubits()
-        result["max_partner_capacity_ratio"] = self._max_partner_capacity_ratio()
+        runtime_result["fraction_of_partner_capacity_exceeding_qubits"] = self._fraction_of_partner_capacity_exceeding_qubits()
+        runtime_result["weighted_fraction_of_partner_capacity_exceeding_qubits"] = self._weighted_fraction_of_partner_capacity_exceeding_qubits()
+        runtime_result["fraction_of_effective_partner_capacity_exceeding_qubits"] = self._fraction_of_effective_partner_capacity_exceeding_qubits()
+        runtime_result["max_partner_capacity_ratio"] = self._max_partner_capacity_ratio()
 
         # interaction spread
-        result["average_interaction_partner_diversity"] = self._average_interaction_partner_diversity()
-        result["average_interaction_entropy"], result["average_effective_partner_number"] = self._average_interaction_entropy()
+        runtime_result["average_interaction_partner_diversity"] = self._average_interaction_partner_diversity()
+        runtime_result["average_interaction_entropy"], runtime_result["average_effective_partner_number"] = self._average_interaction_entropy()
 
         # global structure vs. hardware
-        result["statically_servable_interaction_fraction"] = self._statically_servable_interaction_fraction()
-        result["capacity_constrained_qubit_partition"] = self._capacity_constrained_qubit_partition()
-        result["non_bipartite_interaction_fraction"] = self._non_bipartite_interaction_fraction()
-        return result
+        runtime_result["statically_servable_interaction_fraction"] = self._statically_servable_interaction_fraction()
+        runtime_result["capacity_constrained_qubit_partition"] = self._capacity_constrained_qubit_partition()
+        runtime_result["non_bipartite_interaction_fraction"] = self._non_bipartite_interaction_fraction()
+        return {"runtime": runtime_result, "compilation": compilation_result}
 
     def _fraction_of_partner_capacity_exceeding_qubits(self) -> float:
         """Fraction of interacting qubits with more distinct interaction partners than they can have simultaneously local on the hardware.

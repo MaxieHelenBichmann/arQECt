@@ -21,28 +21,29 @@ class DependencyDAGAnalyzer(MetricExtractor):
         self.hw = hardware
 
     def analyze(self) -> dict[str, object]: # assume valid hardware parameters (especially capacities/durations >0), dag completed with .finalize()
-        result : dict[str, object] = {}
+        runtime_result : dict[str, object] = {}
+        compilation_result : dict[str, object] = {}
 
         # parallelizability
-        result["critical_path_depth"] = self.dag.depth
-        result["2q_depth"] = self._2q_depth()
-        result["critical_path_duration"] = self._critical_path_duration()
-        result["parallelism_saturation"] = self._parallelism_saturation()
-        result["capacity_constrained_depth_bound"] = self._capacity_constrained_depth_bound()
-        result["min_idle_steps"] = self._min_idle_steps()
+        runtime_result["critical_path_depth"] = self.dag.depth
+        runtime_result["2q_depth"] = self._2q_depth()
+        runtime_result["critical_path_duration"] = self._critical_path_duration()
+        runtime_result["parallelism_saturation"] = self._parallelism_saturation()
+        runtime_result["capacity_constrained_depth_bound"] = self._capacity_constrained_depth_bound()
+        runtime_result["min_idle_steps"] = self._min_idle_steps()
 
         # scheduling choices
-        result["average_scheduling_slack"] = self._average_scheduling_slack()
-        result["average_weighted_scheduling_slack"] = self._average_weighted_scheduling_slack()
-        result["no_slack_fraction"] = self._no_slack_fraction()
-        result["min_scheduling_window_congestion"] = self._min_scheduling_window_congestion()
-        result["max_scheduling_window_congestion"] = self._max_scheduling_window_congestion()
+        compilation_result["average_scheduling_slack"] = self._average_scheduling_slack()
+        compilation_result["average_weighted_scheduling_slack"] = self._average_weighted_scheduling_slack()
+        compilation_result["no_slack_fraction"] = self._no_slack_fraction()
+        runtime_result["min_scheduling_window_congestion"] = self._min_scheduling_window_congestion()
+        runtime_result["max_scheduling_window_congestion"] = self._max_scheduling_window_congestion()
 
         # layered resource usage
-        result["average_asap_qubit_reuse"] = self._average_asap_qubit_reuse()
-        result["average_alap_qubit_reuse"] = self._average_alap_qubit_reuse()
-        result["average_asap_qubit_interaction"] = self._average_asap_qubit_interaction()
-        return result
+        runtime_result["average_asap_qubit_reuse"] = self._average_asap_qubit_reuse()
+        runtime_result["average_alap_qubit_reuse"] = self._average_alap_qubit_reuse()
+        runtime_result["average_asap_qubit_interaction"] = self._average_asap_qubit_interaction()
+        return {"runtime": runtime_result, "compilation": compilation_result}
 
     def _2q_depth(self) -> int:
         """Longest dependency chain counting only 2q gates.

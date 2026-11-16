@@ -61,7 +61,7 @@ HYPOTHESES = {
         "capacity_constrained_reuse": (-1, "routing"),
         "partner_switches_per_qubit": (1, "routing"),
         "capacity_constrained_partner_switches_per_qubit": (1, "routing"),
-        "_activity_imbalance": (1, "schedule"),
+        "activity_imbalance": (1, "schedule"),
     },
     "Workload baselines": {
         "N_2q": (1, "routing"),

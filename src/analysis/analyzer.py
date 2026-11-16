@@ -23,7 +23,9 @@ if TYPE_CHECKING:
 @dataclass
 class CircuitAnalysisResult:
     """Interface between Circuit Analysis and Circuit Evaluation."""
-    metrics : None | dict = None
+    compilation_cost_metrics : dict
+    runtime_cost_metrics : dict
+    noise_cost_metrics : dict
 
 
 class CircuitAnalyzer:
@@ -43,13 +45,20 @@ class CircuitAnalyzer:
             processor.run(circuit=circuit)
 
             # 2.) Extract the metrics
-            metrics = {}
             efficiency_analyzer : list[MetricExtractor] = [
                 DependencyDAGAnalyzer(dag, self.hardware),
                 GateDistributionAnalyzer(gd, self.hardware),
                 InteractionGraphAnalyzer(wig, self.hardware),
                 QubitTimelinesAnalyzer(qtl, self.hardware) 
             ]
+
+            compilation_cost = {}
+            runtime_cost = {}
+            for analyzer in efficiency_analyzer:
+                result = analyzer.analyze()
+                compilation_cost.update(result["compilation"])
+                runtime_cost.update(result["runtime"])
+
 
             match function:
                 case "StatePrep": 
@@ -60,8 +69,9 @@ class CircuitAnalyzer:
                     quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware) ]
                 case _:
                     quality_analyzer = []
-                  
-            for analyzer in efficiency_analyzer + quality_analyzer:
-                metrics.update(analyzer.analyze())
 
-            return CircuitAnalysisResult(metrics=metrics)
+            noise_cost = {}
+            for analyzer in quality_analyzer:
+                noise_cost.update(analyzer.analyze())
+
+            return CircuitAnalysisResult(compilation_cost_metrics=compilation_cost, runtime_cost_metrics=runtime_cost, noise_cost_metrics=noise_cost)

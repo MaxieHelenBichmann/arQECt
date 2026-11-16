@@ -22,7 +22,9 @@ def run_ti_structural_analysis(hardware: TrappedIonsModel, circuit: stim.Circuit
     CircuitProcessor(dag, gd, wig, qtl).run(circuit)
     metrics = {}
     for analyzer in [DependencyDAGAnalyzer(dag, hardware), GateDistributionAnalyzer(gd, hardware), InteractionGraphAnalyzer(wig, hardware), QubitTimelinesAnalyzer(qtl, hardware)]:
-        metrics.update(analyzer.analyze())
+        result = analyzer.analyze()
+        metrics.update(result["compilation"])
+        metrics.update(result["runtime"])
     wall_clock_s = time.perf_counter() - start
 
     return metrics, {"wall_clock_s": wall_clock_s}
@@ -35,7 +37,9 @@ def run_na_structural_analysis(hardware: NeutralAtomsModel, circuit: stim.Circui
     CircuitProcessor(dag, gd, wig, qtl).run(circuit)
     metrics = {}
     for analyzer in [DependencyDAGAnalyzer(dag, hardware), GateDistributionAnalyzer(gd, hardware), InteractionGraphAnalyzer(wig, hardware), QubitTimelinesAnalyzer(qtl, hardware)]:
-        metrics.update(analyzer.analyze())
+        result = analyzer.analyze()
+        metrics.update(result["compilation"])
+        metrics.update(result["runtime"])
     wall_clock_s = time.perf_counter() - start
 
     return metrics, {"wall_clock_s": wall_clock_s}
@@ -48,7 +52,9 @@ def run_sc_structural_analysis(hardware: SuperconductingQubitsModel, circuit: st
     CircuitProcessor(dag, gd, wig, qtl).run(circuit)
     metrics = {}
     for analyzer in [DependencyDAGAnalyzer(dag, hardware), GateDistributionAnalyzer(gd, hardware), InteractionGraphAnalyzer(wig, hardware), QubitTimelinesAnalyzer(qtl, hardware)]:
-        metrics.update(analyzer.analyze())
+        result = analyzer.analyze()
+        metrics.update(result["compilation"])
+        metrics.update(result["runtime"])
     wall_clock_s = time.perf_counter() - start
 
     return metrics, {"wall_clock_s": wall_clock_s}

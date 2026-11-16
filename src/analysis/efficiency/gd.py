@@ -18,20 +18,21 @@ class GateDistributionAnalyzer(MetricExtractor):
         self.hw = hardware
 
     def analyze(self) -> dict[str, object]: # assume non-empty circuit with >0 2q-gates, only resets/unitary 1- or 2-qubit gates/measurements, valid hardware parameters (especially gate set has canonical stim gate names)
-        result : dict[str, object] = {}
+        runtime_result : dict[str, object] = {}
+        compilation_result : dict[str, object] = {}
 
         # composition
-        result["nr_gates"] = self._nr_gates()
-        result["share_2q_gates"] = self._share_2q_gates()
-        result["share_measurements"] = self._share_measurements()
-        result["share_resets"] = self._share_resets()
+        runtime_result["nr_gates"] = self._nr_gates()
+        runtime_result["share_2q_gates"] = self._share_2q_gates()
+        runtime_result["share_measurements"] = self._share_measurements()
+        runtime_result["share_resets"] = self._share_resets()
 
         # distance from native gate set
-        result["share_native_gates"] = self._share_native_gates()
-        result["share_native_2q_gates"] = self._share_native_2q_gates()
-        result["estimated_nr_gates_post_transpilation"] = self._estimated_nr_gates_post_transpilation()
-        result["estimated_nr_2q_gates_post_transpilation"] = self._estimated_nr_2q_gates_post_transpilation()
-        return result
+        compilation_result["share_native_gates"] = self._share_native_gates()
+        compilation_result["share_native_2q_gates"] = self._share_native_2q_gates()
+        runtime_result["estimated_nr_gates_post_transpilation"] = self._estimated_nr_gates_post_transpilation()
+        runtime_result["estimated_nr_2q_gates_post_transpilation"] = self._estimated_nr_2q_gates_post_transpilation()
+        return {"runtime": runtime_result, "compilation": compilation_result}
 
     def _nr_gates(self) -> int:
         """Total number of gates. Lower is better."""

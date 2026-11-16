@@ -18,18 +18,19 @@ class QubitTimelinesAnalyzer(MetricExtractor):
         self.hw = hardware
 
     def analyze(self) -> dict[str, object]:
-        result: dict[str, object] = {}
+        runtime_result : dict[str, object] = {}
+        compilation_result : dict[str, object] = {}
 
         # reuse metrics
-        result["average_interaction_reuse_distance"] = self._average_interaction_reuse_distance()
-        result["capacity_constrained_reuse"] = self._capacity_constrained_reuse()
-        result["partner_switches_per_qubit"], result["capacity_constrained_partner_switches_per_qubit"] = self._partner_switches_per_qubit()
+        runtime_result["average_interaction_reuse_distance"] = self._average_interaction_reuse_distance()
+        runtime_result["capacity_constrained_reuse"] = self._capacity_constrained_reuse()
+        runtime_result["partner_switches_per_qubit"], runtime_result["capacity_constrained_partner_switches_per_qubit"] = self._partner_switches_per_qubit()
 
         # composition
-        result["share_mid_circuit_measurements"] = self._share_mid_circuit_measurements()
-        result["_average_1q_run_length"] = self._average_1q_run_length()
-        result["_activity_imbalance"] = self._activity_imbalance()
-        return result
+        runtime_result["share_mid_circuit_measurements"] = self._share_mid_circuit_measurements()
+        compilation_result["average_1q_run_length"] = self._average_1q_run_length()
+        runtime_result["activity_imbalance"] = self._activity_imbalance()
+        return {"runtime": runtime_result, "compilation": compilation_result}
 
     def _average_interaction_reuse_distance(self) -> float:
         """Average distance (in operations on the qubit) between consecutive interactions with the same partner, averaged per qubit and then over qubits.

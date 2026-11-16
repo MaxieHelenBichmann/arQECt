@@ -16,15 +16,15 @@ class CircuitEvaluator:
 
         def evaluate(self, analysis: CircuitAnalysisResult) -> float:
             """Evaluate the extracted circuit properties."""
-            return self._cost_function(analysis.metrics)
+            return self._cost_function(analysis.compilation_cost_metrics, analysis.runtime_cost_metrics, analysis.noise_cost_metrics)
 
 
-        def _cost_function(self, metrics : dict[str, object]) -> float:
+        def _cost_function(self, runtime_metrics : dict[str, object], compilation_metrics : dict[str, object], noise_metrics : dict[str, object]) -> float:
             if isinstance(self.hardware, TrappedIonsModel):
-                return cost_ti(metrics)
+                return cost_ti(runtime_metrics)
             if isinstance(self.hardware, NeutralAtomsModel):
-                return cost_na(metrics)
-            return cost_sc(metrics)
+                return cost_na(runtime_metrics)
+            return cost_sc(runtime_metrics)
 
 
 def cost_ti(metrics : dict[str, object]) -> float:

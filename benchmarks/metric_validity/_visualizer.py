@@ -53,7 +53,7 @@ LABELS = {
     "capacity_constrained_reuse": "capacity reuse",
     "partner_switches_per_qubit": "partner switches / qubit",
     "capacity_constrained_partner_switches_per_qubit": "partner switches / qubit (capacity)",
-    "_activity_imbalance": "activity imbalance",
+    "activity_imbalance": "activity imbalance",
     "N_2q": "nr. 2q gates",
 }
 
