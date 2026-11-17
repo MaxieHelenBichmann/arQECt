@@ -72,7 +72,7 @@ def visualize(results_dir: Path) -> None:
     # per plot: value, its neutral value and color range, file name, subtitle, color bar label, notes
     plots = [("C", 0.5, Normalize(0.25, 0.75), "scorecard",
               "Concordance: Comparing two circuits, does the static metric predict the right order of their actual runtime costs?",
-              "weighted share of circuit pairs whose predicted-worse circuit actually costs more (0.5 = random)",
+              "weighted share of circuit pairs whose predicted-worse circuit actually costs more (metric ties count as 0.5 = random)",
               [costs, ["bold: 95% CI excludes 0.5", "hatched: fewer than 3 code families to compare"]]),
              ("P", 0.0, Normalize(-1, 1), "proportionality",
               "Proportionality: Comparing two circuits, does a larger difference in the static metric correspond to a larger difference in runtime cost?",

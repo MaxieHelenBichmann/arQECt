@@ -1,7 +1,7 @@
 """Summarize the concordance, proportionality and decision regret of the static metrics on circuit pairs into intermediate csvs of the plots.
 Only the runtime cost aspect is validated (hardware events of the compiled circuit), not the compilation cost (compiler work / freedom).
 
-Concordance C: right order of the costs.
+Concordance C: right order of the costs (pairs on which the metric ties count as a random guess, 0.5).
 Proportionality P: larger metric gap = larger cost difference.
 
 Paired by comparable task (same task on the same quantum error-correction code), or matched workload (equal qubits, similar number of 2q gates).
@@ -107,15 +107,15 @@ def summarize(results_dir: Path) -> None:
     for row in summary:
         grouped[(row["platform"], row["compiler"], row["metric"], row.get("design"))].append(row)
     for rows in grouped.values():
-        defined = [r for r in rows if r["status"] == "defined"]
+        defined = [r for r in rows if r["status"] in ("defined", "ties")]  # configs on which the metric ties on all pairs count with C = 0.5
         platform_row = {k: rows[0].get(k) for k in ("platform", "compiler", "metric", "direction", "design", "target")}
-        if not defined:
+        if not any(r["status"] == "defined" for r in defined):
             summary.append({**platform_row, "scope": "platform", "config": "ALL", "status": rows[0]["status"]})
             continue
-        replicates = {k: np.nanmean([r[f"_{k}"] for r in defined], axis=0) for k in ("C", "P")}
+        replicates = {k: np.nanmean([r[f"_{k}"] for r in defined if f"_{k}" in r], axis=0) for k in ("C", "P")}
         n_families = max(r["n_families"] for r in defined)
         summary.append({**platform_row, "scope": "platform", "config": "ALL", "status": "defined",
-                        **{k: np.nanmean([r[k] for r in defined]) for k in ("C", "P", "decisiveness", "regret_rel", "regret_rel_N_2q", "regret_rel_random")},
+                        **{k: np.nanmean([r.get(k, np.nan) for r in defined]) for k in ("C", "P", "decisiveness", "regret_rel", "regret_rel_N_2q", "regret_rel_random")},
                         **{f"{k}_lo": np.nanpercentile(v, 2.5) for k, v in replicates.items()},
                         **{f"{k}_hi": np.nanpercentile(v, 97.5) for k, v in replicates.items()},
                         "n_pairs": sum(r["n_pairs"] for r in defined), "n_families": n_families, "sparse": n_families < 3,
@@ -162,8 +162,8 @@ def evaluate(circuits: dict, metric: str, direction: int, target: str, design: s
     untied = ~np.isclose(s[left], s[right])
     y_worse, y_better = np.where(s[left] > s[right], y[left], y[right]), np.where(s[left] > s[right], y[right], y[left])
     target_tied = np.isclose(y_worse, y_better)
-    score = untied * np.where(target_tied, 0.5, y_worse > y_better)
-    C = (W @ score) / (W @ untied)
+    score = np.where(untied, np.where(target_tied, 0.5, y_worse > y_better), 0.5)  # metric ties: random guess
+    C = (W @ score) / W.sum(axis=1)
     families_untied = len(set(family[left[untied]]) | set(family[right[untied]]))
     row = {"status": "defined" if untied.any() else "ties", "C": C[0], "C_lo": np.nanpercentile(C[1:], 2.5), "C_hi": np.nanpercentile(C[1:], 97.5),
            "decisiveness": w @ untied / w.sum(), "target_tie_share": w @ (untied & target_tied) / (w @ untied),
