@@ -1,4 +1,30 @@
-"""State preparation circuits."""
+"""State preparation circuits.
+
+The supported state preparation circuits can be structured after the following protocols:
+
+A) Normal state preparation (probably "non-fault tolerant state preparation")
+    - simple state preparation circuit without any gadgets
+    - resulting output state is intended to be the targeted state (no rejection of shots)
+
+B) Verification-based state preparation ("Non-deterministic fault-tolerant state preparation")
+    - simple state preparation + subsequent verification circuit
+    - verification circuit can either accept (no detected error) or reject (detected error) the prepared state
+    - if state rejected, start all over
+    - resulting output state is not necessarily intended to be the targeted state (rejection of shots)
+
+C) Correction-based state preparation ("Deterministic fault-tolerant state preparation")
+    - simple state preparation + subsequent verification circuit + subsequent correction circuit(s)
+    - verification circuit can either accept (no detected error) or reject (detected error) the prepared state
+    - if state rejected, correction circuit applies recovery operation based on the verification result
+    - resulting output state is intended to be the targeted state (no rejection of shots)
+
+For a non-deterministic state preparation, certain shots (the ones which the verifier rejects, as specified via `accept_if`) are discarded. 
+"""
+
+# TODO: QECirc circuits dont have correction part of their downloadable det-ft-state-prep circuits 
+# (it requires "classical" branches that, when implemented as a larger circuits with more controlled operations, arent really realistic and add more gates and noise than they really would - so they might be slightly pessimistic...
+# also, those classically controlled operations rely on classical AND logic, which stim doesnt support)
+# so for now I decided to interpret those circuits as their verification-variant, aka as adapting protocol B as well (not perfect but it is how it is)
 
 from __future__ import annotations
 
@@ -14,8 +40,6 @@ from src.circuits.circuit import QuantumState
 
 if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
-
-
 
 class StatePreparationCircuitAnalyzer(MetricExtractor):
     def __init__(self, hardware: HardwareModel, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString, stim.PauliString]], max_shots: int, decoder: Decoder, accept_if: dict[int, int] | None = None, state: QuantumState | None = None):
@@ -48,7 +72,7 @@ class StatePreparationCircuitAnalyzer(MetricExtractor):
 
         samples = experiment.compile_sampler().sample(self.max_shots)
 
-        # discard results that verification does not accept
+        # discard results that verification does not accept (Protocol B)
         accepted_mask = np.ones(self.max_shots, dtype=bool)
 
         for index, expected in self.accept_if.items():
