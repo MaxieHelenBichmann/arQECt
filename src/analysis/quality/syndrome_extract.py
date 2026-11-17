@@ -12,10 +12,11 @@ if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
 
 class SyndromeExtractionAnalyzer(MetricExtractor):
-    def __init__(self, hardware: HardwareModel, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString]]):
+    def __init__(self, hardware: HardwareModel, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString]],  max_shots: int):
         self.hw = hardware
         self.stabilizers = stabilizers
         self.logical_operators = logical_operators
+        self.max_shots = max_shots
 
     def analyze(self) -> dict[str, object]:
         return {}

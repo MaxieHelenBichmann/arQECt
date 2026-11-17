@@ -44,6 +44,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "bloqade-lanes" },
+    { name = "ldpc" },
     { name = "matplotlib" },
     { name = "mqt-ionshuttler" },
     { name = "mqt-qmap" },
@@ -65,6 +66,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "bloqade-lanes", specifier = "==0.11.9" },
+    { name = "ldpc", specifier = ">=2.4.1" },
     { name = "matplotlib", specifier = "==3.11.2" },
     { name = "mqt-ionshuttler", specifier = "==0.3.0" },
     { name = "mqt-qmap", specifier = "==3.11.0" },

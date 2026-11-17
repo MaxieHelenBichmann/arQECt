@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import math
+import numpy as np
 from typing import Literal
 
 # TODO: have more sophisticated implementation of error channels, especially considering 2-qubit error channels
@@ -161,4 +162,45 @@ class NoiseModel:
     def empty(cls) -> NoiseModel:
         """Build an empty noise model, meaning each error channel is the identity channel."""
         return cls.from_specs()
+
+    def get_aggregated_probabilities(self, idle_noise_duration: float | None = None) -> tuple[float, float]: # (p_x, p_z)
+        def _channel_prob(channel: ErrorChannel) -> tuple[float, float]:
+            if channel.gate_name in (None, "I"):
+                return 0.0, 0.0
+
+            if channel.gate_name == "X_ERROR":
+                return channel.gate_arguments[0], 0.0
+            if channel.gate_name == "Y_ERROR":
+                return channel.gate_arguments[0], channel.gate_arguments[0]
+            if channel.gate_name == "Z_ERROR":
+                return 0.0, channel.gate_arguments[0]
+            if channel.gate_name == "DEPOLARIZE1":
+                return 2 * channel.gate_arguments[0] / 3, 2 * channel.gate_arguments[0] / 3
+            if channel.gate_name == "DEPOLARIZE2":
+                return 8 * channel.gate_arguments[0] / 15, 8 * channel.gate_arguments[0] / 15
+            if channel.gate_name == "PAULI_CHANNEL_1":
+                return channel.gate_arguments[0] + channel.gate_arguments[1], channel.gate_arguments[1] + channel.gate_arguments[2]
+
+            if channel.gate_name == "PAULI_CHANNEL_2":
+                labels = [ a + b for a in "IXYZ" for b in "IXYZ" if a + b != "II"]
+                px = np.mean([sum(prob for pair, prob in zip(labels, channel.gate_arguments) if pair[q] in "XY") for q in (0, 1)])
+                pz = np.mean([sum(prob for pair, prob in zip(labels, channel.gate_arguments) if pair[q] in "ZY") for q in (0, 1)])
+                return float(px), float(pz)
+
+            raise ValueError(f"Unsupported noise channel: {channel.gate_name}")
+
+
+        channels = [self.single_qubit_gate_noise, self.two_qubit_gate_noise,self.reset_noise,self.hardware_event_noise]
+
+        if idle_noise_duration is not None:
+            channels.append(self.idle_noise(idle_noise_duration))
+
+        channels = [ch for ch in channels if ch.gate_name not in (None, "I")]
+
+        if not channels:
+            return 0.0, 0.0
+
+        return tuple(
+            np.mean([_channel_prob(ch) for ch in channels], axis=0)
+        )
 

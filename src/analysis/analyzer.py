@@ -22,6 +22,8 @@ from src.circuits.circuit import QECCircuit
 if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
 
+MAX_SHOTS = 10_000
+
 @dataclass
 class CircuitAnalysisResult:
     """Interface between Circuit Analysis and Circuit Evaluation."""
@@ -64,11 +66,11 @@ class CircuitAnalyzer:
 
             match circuit.function:
                 case "StatePrep": 
-                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, circuit.quantum_state) ]
+                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, accept_if=circuit.verification, state=circuit.quantum_state) ]
                 case "Encoding": 
-                    quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators) ]
+                    quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, MAX_SHOTS) ]
                 case "Syndrome": 
-                    quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators) ]
+                    quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, MAX_SHOTS) ]
                 case _:
                     quality_analyzer = []
 

@@ -7,6 +7,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
     "bloqade-lanes==0.11.9",
+    "ldpc>=2.4.1",
     "matplotlib==3.11.2",
     "mqt-ionshuttler==0.3.0",
     "mqt-qmap==3.11.0",

@@ -15,3 +15,4 @@ class QECCircuit:
     stabilizers: list[stim.PauliString]
     logical_operators: list[tuple[stim.PauliString]] # (X_i, Z_i)
     quantum_state: QuantumState | None = None
+    verification: dict[int, int] | None = None
