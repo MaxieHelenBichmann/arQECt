@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class StatePreparationCircuitAnalyzer(MetricExtractor):
-    def __init__(self, hardware: HardwareModel, stabilizers: list[stim.PauliString], logical_operators: list[stim.PauliString], state: QuantumState | None = None):
+    def __init__(self, hardware: HardwareModel, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString]], state: QuantumState | None = None):
         self.hw = hardware
         self.stabilizers = stabilizers
         self.logical_operators = logical_operators
