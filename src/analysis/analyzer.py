@@ -18,6 +18,7 @@ from src.analysis.quality.state_prep import StatePreparationCircuitAnalyzer
 from src.analysis.quality.syndrome_extract import SyndromeExtractionAnalyzer
 from dataclasses import dataclass
 from src.circuits.circuit import QECCircuit
+from src.analysis.quality._decoder import BeliefPropOrdStat
 
 if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
@@ -64,9 +65,11 @@ class CircuitAnalyzer:
                 runtime_cost.update(result["runtime"])
 
 
+            decoder = BeliefPropOrdStat(self.hardware, circuit.stabilizers)
+
             match circuit.function:
                 case "StatePrep": 
-                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, accept_if=circuit.verification, state=circuit.quantum_state) ]
+                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, accept_if=circuit.verification, state=circuit.quantum_state) ]
                 case "Encoding": 
                     quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, MAX_SHOTS) ]
                 case "Syndrome": 
