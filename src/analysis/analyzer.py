@@ -64,7 +64,7 @@ class CircuitAnalyzer:
 
             match circuit.function:
                 case "StatePrep": 
-                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators) ]
+                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, circuit.quantum_state) ]
                 case "Encoding": 
                     quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators) ]
                 case "Syndrome": 
