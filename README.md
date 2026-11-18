@@ -85,7 +85,5 @@ uv run python -m benchmarks.model_accuracy.runner
 ```
 
 ## AI Transparency
-I used AI to set up DevEnvironment, aka uv, CI, license etc.
-only tests are Ai generated until now, will be adapted later.
-I also used AI to use the other compilers or decoders, aka tell me how i could setup the libraries data structures and extract the metrics that i needed for purpose.
-in this respect, i also used it for IO helpers (yaml, csv, matplotlib)
+I used AI agents to set up the development environment (`uv`, CI workflows, license etc.), as well as to manage the third-party compilers ([MQT QMAP](https://github.com/munich-quantum-toolkit/qmap), [MQT IonShuttler](https://github.com/munich-quantum-toolkit/ionshuttler), [Bloqade Lanes](https://github.com/QuEraComputing/bloqade-lanes), [Qiskit SABRE](https://github.com/Qiskit/qiskit)) in my validation benchmarks and third-party decoders ([LDPC](https://github.com/quantumgizmos/ldpc) decoders) in the actual analysis, primarily to setup, parameterize and handle the library data structures and extract the relevant metrics that I needed for my further processing.
+I also generated IO helpers (yaml, csv, matplotlib) and (for now) all tests, which will be will be adapted and improved later.
