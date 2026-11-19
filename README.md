@@ -38,6 +38,12 @@ Below, there is another preliminary sketch - the data flow that I am planning fo
 These statically and dynamically extracted metrics then are combined in a cost function, that evaluates the circuits suitability for the hardware. 
 ![Crude sketch of the targeted data flow](docs/images/dataflow.png)
 
+### Potential Rabbit Holes
+
+- more realistic hardware models thus more realistic abstract execution (while better and more detailed hardware architecture description via user parameters possible, could assume too much about compilation algorithms or get too close to compilation in itself)
+- more realistic noise model (add non-unitary noise without Pauli-twirling and more detailed noise sites for more realistic model, but would make circuit simulation/evaluation harder)
+- more advanced circuit-efficiency metrics/evaluation
+- more advanced circuit-quality metrics/evaluation (analyze theoretical fault propagation, focus on different types of errors (e.g. hook), different decoders, additional physical errors, ...)
 
 # Dev Setup
 
