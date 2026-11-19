@@ -18,7 +18,11 @@ C) Correction-based state preparation ("Deterministic fault-tolerant state prepa
     - if state rejected, correction circuit applies recovery operation based on the verification result
     - resulting output state is intended to be the targeted state (no rejection of shots)
 
-For a non-deterministic state preparation, certain shots (the ones which the verifier rejects, as specified via `accept_if`) are discarded. 
+For a non-deterministic state preparation, certain shots (the ones which the verifier rejects, as specified via `accept_if`) are discarded.
+
+After running the state preparation circuit and obtaining a targeted state, the code's stabilizers and targeted logical operators
+are measured as observables, the stabilizer syndrome is decoded and the recovery operation virtually applied and evaluated to find out whether 
+the noisily prepared and error-corrected state actually corresponds to the right logical state.
 """
 
 # TODO: QECirc circuits dont have correction part of their downloadable det-ft-state-prep circuits 
