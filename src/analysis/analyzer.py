@@ -71,7 +71,7 @@ class CircuitAnalyzer:
                 case "StatePrep": 
                     quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, accept_if=circuit.verification, state=circuit.quantum_state) ]
                 case "Encoding": 
-                    quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, MAX_SHOTS) ]
+                    quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, logical_qubits=circuit.logical_qubits) ]
                 case "Syndrome": 
                     quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, MAX_SHOTS) ]
                 case _:

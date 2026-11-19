@@ -13,6 +13,7 @@ class QECCircuit:
     circuit: stim.Circuit
     function: CircuitFunction 
     stabilizers: list[stim.PauliString]
-    logical_operators: list[tuple[stim.PauliString]] # (X_i, Z_i)
+    logical_operators: list[tuple[stim.PauliString]] # (XL_i, ZL_i)
     quantum_state: QuantumState | None = None
     verification: dict[int, int] | None = None
+    logical_qubits: list[int] | None = None # logical_qubits[i] <--> logical_operators[i]
