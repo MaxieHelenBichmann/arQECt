@@ -1,6 +1,7 @@
 """State preparation circuits.
 
-The supported state preparation circuits can be structured after the following protocols:
+This analysis considers noise robustness, and assumes correctness of the original circuit.
+The supported state preparation circuits prepare a concretely fixed logical state and can be structured after the following protocols:
 
 A) Normal state preparation (probably "non-fault tolerant state preparation")
     - simple state preparation circuit without any gadgets

@@ -1,8 +1,10 @@
 """Encoder circuits.
 
+This analysis considers noise robustness, and assumes correctness of the original circuit.
+It supports encoder circuits of non-subsystem quantum error-correction codes, which map an arbitrary given logical state to the corresponding physical state.
 
-The analysis supports encoder circuits of non-subsystem quantum error-correction codes.
-The logical qubits qL_1, ... , qL_k corresponding to the logical operators (XL_1, ZL_1), ... , (XL_k, ZL_k)
+We do not want to choose an arbitrary subset of logical states to verify whether the noisy circuit preserves its functionality, but capture 
+information about the whole code space. Thus, the logical qubits qL_1, ... , qL_k corresponding to the logical operators (XL_1, ZL_1), ... , (XL_k, ZL_k)
 are entangled with noiseless reference qubits qR_1, ... , qR_k, constructing the fully entangled state.
 
 The ideal observables of this state are the stabilizers on the physical-state subsystem (and identity on the reference subsystem) 
