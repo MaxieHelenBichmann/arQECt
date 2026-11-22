@@ -15,5 +15,6 @@ class QECCircuit:
     stabilizers: list[stim.PauliString]
     logical_operators: list[tuple[stim.PauliString]] # (XL_i, ZL_i)
     quantum_state: QuantumState | None = None
-    verification: dict[int, int] | None = None
+    verification: dict[int, int] | None = None # measurement[i] --> expected outcome (0/1)
     logical_qubits: list[int] | None = None # logical_qubits[i] <--> logical_operators[i]
+    syndrome_measurements: list[int] | None = None # syndrome_measurements[i] <--> stabilizers[i]

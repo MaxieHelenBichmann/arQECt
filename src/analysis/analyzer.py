@@ -73,7 +73,7 @@ class CircuitAnalyzer:
                 case "Encoding": 
                     quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, logical_qubits=circuit.logical_qubits) ]
                 case "Syndrome": 
-                    quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, MAX_SHOTS) ]
+                    quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, syndrome_measurements=circuit.syndrome_measurements) ]
                 case _:
                     quality_analyzer = []
 
