@@ -4,3 +4,9 @@ architecture:
   topology: "grid"
   nr_zones: 4
   grid_size: [2, 3]
+  noise:
+    single_qubit_gate: ["Depolarize", [0.0001]]
+    two_qubit_gate: ["Depolarize", [0.003]]
+    measurement: ["Measurement", [0.003]]
+    reset: ["BitFlip", [0.001]]
+    hardware_event: ["Depolarize", [0.0005]]

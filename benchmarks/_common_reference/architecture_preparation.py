@@ -16,6 +16,7 @@ from mqt.qmap.sc import Architecture as SCArchitecture
 
 
 from src.models.hardware import HardwareModel, PlatformTag
+from src.models.noise.noise import NoiseModel
 from collections.abc import Callable
 
 HardwareArchitecture = TIArchitecture | ZonedNeutralAtomArchitecture | SCArchitecture | CouplingMap | dict
@@ -54,7 +55,8 @@ def prepare_ti_hardware(parameters: dict, num_qubits: int) -> tuple[TrappedIonsM
     else:
         raise ValueError(f"Unsupported trapped ion architecture {parameters['topology']!r} (linear, ring, grid).")
 
-    abstract_model = TrappedIonsModel(interaction_zone_capacity=capacity, nr_interaction_sites=nr_zones, native_gates=TI_NATIVE_GATES)
+    abstract_model = TrappedIonsModel(interaction_zone_capacity=capacity, nr_interaction_sites=nr_zones, native_gates=TI_NATIVE_GATES,
+                                      noise_model=NoiseModel.from_specs(**parameters.get("noise", {})))
     return abstract_model, {"IonShuttler": concrete_hardware}
 
 def prepare_na_hardware(parameters: dict, num_qubits: int) -> tuple[NeutralAtomsModel, dict[str, ZonedNeutralAtomArchitecture | dict]]:
@@ -62,7 +64,6 @@ def prepare_na_hardware(parameters: dict, num_qubits: int) -> tuple[NeutralAtoms
     read by MQT QMAP (zoned) and adapted to fixed transport lanes for Bloqade Lanes (only with one entanglement zone).
 
     parameters: `entanglement_zone_size` fixed n x m grid
-    
     """
     ez_rows, ez_cols = parameters["entanglement_zone_size"]
     nr_ezs = parameters.get("nr_entanglement_zones", 1)
@@ -137,7 +138,7 @@ def prepare_na_hardware(parameters: dict, num_qubits: int) -> tuple[NeutralAtoms
 
     readout_rows, readout_cols = parameters["readout_zone_size"]
     abstract_model = NeutralAtomsModel(entanglement_zone_capacity=nr_ezs * ez_rows * ez_cols, readout_zone_capacity=readout_rows * readout_cols,
-                                       native_gates=NA_NATIVE_GATES)
+                                       native_gates=NA_NATIVE_GATES, noise_model=NoiseModel.from_specs(**parameters.get("noise", {})))
     return abstract_model, concrete_hardware
 
 
@@ -196,7 +197,8 @@ def prepare_sc_hardware(parameters: dict, num_qubits: int) -> tuple[Superconduct
     coupling = {edge for u, v in chip.edges for edge in [(u, v), (v, u)]}  # bidirectional
     concrete_hardware = {"QMAP": SCArchitecture(num_qubits, coupling), "SABRE": CouplingMap(sorted(list(edge) for edge in coupling))}
     abstract_model = SuperconductingQubitsModel(number_of_qubits=num_qubits, topology=dict(Counter(d for _, d in chip.degree)),
-                                                gate_durations={"SN": 1, "MS": 1, "EN": 1}, native_gates=SC_NATIVE_GATES)
+                                                gate_durations={"SN": 1, "MS": 1, "EN": 1}, native_gates=SC_NATIVE_GATES,
+                                                noise_model=NoiseModel.from_specs(**parameters.get("noise", {})))
     return abstract_model, concrete_hardware
 
 

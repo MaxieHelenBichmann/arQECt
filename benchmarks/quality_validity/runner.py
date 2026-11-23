@@ -19,7 +19,7 @@ _CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "circuits"
 _RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "quality_validity"
 
 
-def run(functions: list[CircuitFunction], max_qubits: int) -> None:
+def run(functions: list[CircuitFunction], max_qubits: int, max_shots: int) -> None:
 
     for path in [*(_RESULTS_DIR / "raw" / function.lower() for function in functions), _RESULTS_DIR / "plots", _RESULTS_DIR / "summary.csv"]:
         if path.is_dir():
@@ -30,7 +30,7 @@ def run(functions: list[CircuitFunction], max_qubits: int) -> None:
             continue
         print(f"Deleted {path}...")
 
-    collect(functions, _CIRCUIT_DIR, _RESULTS_DIR, max_qubits)
+    collect(functions, _CIRCUIT_DIR, _CONFIG_DIR, _RESULTS_DIR, max_qubits)
     summarize(_RESULTS_DIR)
     visualize(_RESULTS_DIR)
 
@@ -42,6 +42,7 @@ if __name__ == "__main__":
     parser.add_argument("--function", nargs="+", choices=["StatePrep", "Encoding", "Syndrome"], default=["StatePrep", "Encoding", "Syndrome"],
                         help="only run analyses of these functions (default: all)")
     parser.add_argument("--max-qubits", type=int, default=sys.maxsize, help="skip circuits with more qubits (default: no limit)")
+    parser.add_argument("--max-shots", type=int, default=10_000, help="number of shots used for sampling")
     args = parser.parse_args()
 
-    run(functions=args.function, max_qubits=args.max_qubits)
+    run(functions=args.function, max_qubits=args.max_qubits, max_shots=args.max_shots)

@@ -5,3 +5,9 @@ architecture:
   entanglement_zone_size: [7, 20]
   readout_zone_size: [5, 20]
   storage_zone_size: [20, 100]
+  noise:
+    single_qubit_gate: ["Depolarize", [0.0003]]
+    two_qubit_gate: ["Depolarize", [0.005]]
+    measurement: ["Measurement", [0.002]]
+    reset: ["BitFlip", [0.002]]
+    hardware_event: ["Depolarize", [0.001]]

@@ -2,3 +2,9 @@ platform: SC
 name: "Google Willow"
 architecture:
   topology: "square"
+  noise:
+    single_qubit_gate: ["Depolarize", [0.0003]]
+    two_qubit_gate: ["Depolarize", [0.003]]
+    measurement: ["Measurement", [0.007]]
+    reset: ["BitFlip", [0.001]]
+    idle: ["ThermalRelaxation", [2700, 3500]]

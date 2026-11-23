@@ -2,3 +2,9 @@ platform: SC
 name: "IBM Heron"
 architecture:
   topology: "heavy_hex"
+  noise:
+    single_qubit_gate: ["Depolarize", [0.0003]]
+    two_qubit_gate: ["Depolarize", [0.004]]
+    measurement: ["Measurement", [0.012]]
+    reset: ["BitFlip", [0.002]]
+    idle: ["ThermalRelaxation", [4000, 2500]]

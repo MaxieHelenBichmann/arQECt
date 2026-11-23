@@ -4,3 +4,9 @@ architecture:
   topology: "linear"
   nr_zones: 1
   zone_capacity: 3
+  noise:
+    single_qubit_gate: ["Depolarize", [0.00002]]
+    two_qubit_gate: ["Depolarize", [0.001]]
+    measurement: ["Measurement", [0.003]]
+    reset: ["BitFlip", [0.001]]
+    hardware_event: ["Depolarize", [0.0001]]

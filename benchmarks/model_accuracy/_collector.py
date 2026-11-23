@@ -53,7 +53,7 @@ def collect(platforms: list[str], circuit_dir: Path, config_dir: Path, results_d
             print(f"[{config["platform"]}] Running baseline execution of {circuit_name} on ({config["name"]})...")
             baseline_hardware_events, baseline_details = _RUN_BASELINE[config["platform"]](circuit)
             print(f"[{config["platform"]}] Running abstract execution of {circuit_name} on ({config["name"]})...")
-            abstract_hardware_events, abstraction_details = _RUN_ABSTRACTION[config["platform"]](hardware=abstract_hardware, circuit=circuit)
+            abstract_hardware_events, abstraction_details, _ = _RUN_ABSTRACTION[config["platform"]](hardware=abstract_hardware, circuit=circuit)
 
             for compiler, (run_compiler, raw_file) in compilers.items():
                 if compiler not in concrete_hardwares:

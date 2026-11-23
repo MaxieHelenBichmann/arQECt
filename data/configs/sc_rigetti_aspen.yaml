@@ -2,3 +2,9 @@ platform: SC
 name: "Rigetti Aspen"
 architecture:
   topology: "octagonal"
+  noise:
+    single_qubit_gate: ["Depolarize", [0.002]]
+    two_qubit_gate: ["Depolarize", [0.04]]
+    measurement: ["Measurement", [0.04]]
+    reset: ["BitFlip", [0.01]]
+    idle: ["ThermalRelaxation", [400, 300]]

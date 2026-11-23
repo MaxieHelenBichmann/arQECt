@@ -3,3 +3,9 @@ name: "Quantinuum Helios"
 architecture:
   topology: "ring"
   nr_zones: 2
+  noise:
+    single_qubit_gate: ["Depolarize", [0.00003]]
+    two_qubit_gate: ["Depolarize", [0.0008]]
+    measurement: ["Measurement", [0.0005]]
+    reset: ["BitFlip", [0.0005]]
+    hardware_event: ["Depolarize", [0.0001]]

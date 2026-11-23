@@ -2,3 +2,9 @@ platform: SC
 name: "Hexagonal"
 architecture:
   topology: "hex"
+  noise:
+    single_qubit_gate: ["Depolarize", [0.001]]
+    two_qubit_gate: ["Depolarize", [0.01]]
+    measurement: ["Measurement", [0.01]]
+    reset: ["BitFlip", [0.002]]
+    idle: ["ThermalRelaxation", [1000, 1000]]
