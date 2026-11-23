@@ -30,28 +30,18 @@ def run(functions: list[CircuitFunction], max_qubits: int) -> None:
             continue
         print(f"Deleted {path}...")
 
-    collect(functions, _CIRCUIT_DIR, _CONFIG_DIR, _RESULTS_DIR, max_qubits)
+    collect(functions, _CIRCUIT_DIR, _RESULTS_DIR, max_qubits)
     summarize(_RESULTS_DIR)
     visualize(_RESULTS_DIR)
-
-
-def save_raw_results(file: Path, metadata: dict, metrics: dict, compiled: dict) -> None:
-    file.parent.mkdir(parents=True, exist_ok=True)
-    with open(file, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([*metadata, "source", "metric", "value"])
-        for source, values in {"structural": metrics, "compiled": compiled}.items():
-            for metric, value in values.items():
-                writer.writerow([*metadata.values(), source, metric, "" if value is None else value])
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Validate the static efficiency metrics against compiled resource costs.")
-    parser.add_argument("--function", nargs="+", choices=["SP", "EC", "SE"], default=["SP", "EC", "SE"],
+    parser = argparse.ArgumentParser(description="Validate the quality metrics of QEC circuits.")
+    parser.add_argument("--function", nargs="+", choices=["StatePrep", "Encoding", "Syndrome"], default=["StatePrep", "Encoding", "Syndrome"],
                         help="only run analyses of these functions (default: all)")
     parser.add_argument("--max-qubits", type=int, default=sys.maxsize, help="skip circuits with more qubits (default: no limit)")
     args = parser.parse_args()
 
-    run(functions=args.functions, max_qubits=args.max_qubits)
+    run(functions=args.function, max_qubits=args.max_qubits)

@@ -14,32 +14,34 @@ from benchmarks._common_reference.circuit_preparation import _PREPARE_CIRCUIT
 
 def collect(functions: list[CircuitFunction], circuit_dir: Path, results_dir: Path, max_qubits: int) -> None:
     # collect different circuits (with their task group folder)
-    circuits : dict[CircuitFunction, dict[str, stim.Circuit]] = {"StatePrep": {}, "Encoding": {}, "Syndrome": {}}
+    circuits : dict[CircuitFunction, dict[str, tuple[Path, stim.Circuit]]] = {"StatePrep": {}, "Encoding": {}, "Syndrome": {}}
     for circuit_file in sorted(circuit_dir.glob("*/*/*.stim")):
         circuit = stim.Circuit.from_file(circuit_file)
+
         if circuit.num_qubits <= max_qubits:
             task = circuit_file.parent.name
             if task == "syndrome_extraction":
                 function = "Syndrome"
             elif task == "encoding":
                 function = "Encoding"
+                if circuit_file.parent.parent.name in ["9-1-3", "16-1-4-bacon-shor", "49-9-4"]: # subsystem codes
+                    continue
             elif task.endswith("preparation"):
                 function = "StatePrep"
             else:
                 continue
-            circuits[function][circuit_file.stem] = (circuit_file.parent.relative_to(circuit_dir).as_posix(), circuit)
+            circuits[function][circuit_file.stem] = (circuit_file, circuit)
     print(f"Collected {sum(len(c) for c in circuits.values())} circuits...")
 
     # run the analyses for each circuit
     for function in functions:
-        for circuit_name, circuit in circuits[function].items():
-            
+        for circuit_name, (circuit_file, circuit) in circuits[function].items():
             raw_file = results_dir / "raw" / function.lower() / f"__{circuit_name}.csv"
             if raw_file.exists():
                 print(f"[{function}] Skipping {circuit_name}: raw result already exists")
                 continue
             
-            qec_circuit = _PREPARE_CIRCUIT[function](circuit_name, circuit)
+            qec_circuit = _PREPARE_CIRCUIT[function](circuit_file, circuit)
 
             print(f"[{function}] Running monte carlo analysis of {circuit_name}...")
             mc_metrics = _RUN_MONTE_CARLO[function](circuit=qec_circuit)

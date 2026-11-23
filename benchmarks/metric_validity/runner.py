@@ -39,16 +39,6 @@ def run(platforms: list[PlatformTag], max_qubits: int, max_compile_time: float, 
     visualize(_RESULTS_DIR)
 
 
-def save_raw_results(file: Path, metadata: dict, metrics: dict, compiled: dict) -> None:
-    file.parent.mkdir(parents=True, exist_ok=True)
-    with open(file, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([*metadata, "source", "metric", "value"])
-        for source, values in {"structural": metrics, "compiled": compiled}.items():
-            for metric, value in values.items():
-                writer.writerow([*metadata.values(), source, metric, "" if value is None else value])
-
-
 if __name__ == "__main__":
     import argparse
 
