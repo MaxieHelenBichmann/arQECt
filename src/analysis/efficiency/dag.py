@@ -106,10 +106,10 @@ class DependencyDAGAnalyzer(MetricExtractor):
         Range [0, inf), 0 for hardware without zone limits.
         """
         if isinstance(self.hw, TrappedIonsModel):
-            nr_2q_gates = sum([1 for g in  self.dag.dag.values() if len(g.qubits) == 2])
-            parallel_capacity = self.hw.interaction_zone_capacity * self.hw.nr_interaction_sites
+            nr_gates = len(self.dag.dag)
+            parallel_capacity = self.hw.nr_interaction_sites
 
-            return math.ceil(nr_2q_gates * 1.0 / parallel_capacity)
+            return math.ceil(nr_gates * 1.0 / parallel_capacity)
         
         elif isinstance(self.hw, NeutralAtomsModel):
             nr_2q_gates = sum([1 for g in  self.dag.dag.values() if len(g.qubits) == 2])
@@ -139,7 +139,7 @@ class DependencyDAGAnalyzer(MetricExtractor):
         congestion = 0
         for s, e in combinations_with_replacement(range(1, self.dag.depth + 1), 2):
             if isinstance(self.hw, TrappedIonsModel):
-                parallel_capacity = self.hw.interaction_zone_capacity * self.hw.nr_interaction_sites
+                parallel_capacity = self.hw.nr_interaction_sites
                 must_execute_candidates = sum([1 for g in self.dag.dag.values() if g.schedule_interval[0] >= s and g.schedule_interval[1] <= e])
                 if must_execute_candidates > (e - s + 1) * parallel_capacity:
                     congestion += 1
@@ -166,7 +166,7 @@ class DependencyDAGAnalyzer(MetricExtractor):
         congestion = 0
         for i in range(1, self.dag.depth + 1):
             if isinstance(self.hw, TrappedIonsModel):
-                parallel_capacity = self.hw.interaction_zone_capacity * self.hw.nr_interaction_sites
+                parallel_capacity = self.hw.nr_interaction_sites
                 may_execute_candidates = sum([1 for g in self.dag.dag.values() if g.schedule_interval[0] <= i and g.schedule_interval[1] >= i])
                 if may_execute_candidates > parallel_capacity:
                     congestion += 1
@@ -187,7 +187,7 @@ class DependencyDAGAnalyzer(MetricExtractor):
     def _average_asap_qubit_reuse(self) -> float:
         """Mean fraction of qubits active in ASAP layer i that are also active in layer i+1.
 
-        Range [0, 1]. High = qubits are busy back-to-back (possibly can be reused); low = qubits idle between layers.
+        Range [0, 1], 0 for depth <= 1 (no consecutive layers). High = qubits are busy back-to-back (possibly can be reused); low = qubits idle between layers.
         """
         gate_asap_layer: defaultdict[int, list[int]] = defaultdict(list)
         for idx, g in self.dag.dag.items():
@@ -199,7 +199,7 @@ class DependencyDAGAnalyzer(MetricExtractor):
             qubits_next = {q for g in gate_asap_layer[i+1] for q in self.dag.dag[g].qubits}
             reuse.append(len(qubits_i & qubits_next) * 1.0 / len(qubits_i))
 
-        return sum(reuse) / len(reuse)
+        return sum(reuse) / len(reuse) if reuse else 0.0
 
     def _average_alap_qubit_reuse(self) -> float:
         """Same as the ASAP qubit reuse, but on the ALAP schedule. Range [0, 1], interpretation as for ASAP."""
@@ -213,7 +213,7 @@ class DependencyDAGAnalyzer(MetricExtractor):
             qubits_next = {q for g in gate_alap_layer[i+1] for q in self.dag.dag[g].qubits}
             reuse.append(len(qubits_i & qubits_next) * 1.0 / len(qubits_i))
 
-        return sum(reuse) / len(reuse)
+        return sum(reuse) / len(reuse) if reuse else 0.0
 
     def _average_asap_qubit_interaction(self, window: int = 4) -> float:
         """Interaction graph density within sliding constant-sized windows of consecutive ASAP layers.

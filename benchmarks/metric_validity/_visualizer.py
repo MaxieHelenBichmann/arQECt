@@ -68,6 +68,7 @@ def visualize(results_dir: Path) -> None:
     costs = ["Runtime costs (aggregated per compiled circuit, not normalized):",
              "   - routing  = qubit moves (SC swaps, TI shuttles, NA atom transports)",
              "   - schedule = compiled schedule length",
+             "   - stretch  = compiled schedule length / critical path depth (window congestion metrics)",
              "   - idle     = time qubits wait between their gates (in compiler timesteps)"]
     # per plot: value, its neutral value and color range, file name, subtitle, color bar label, notes
     plots = [("C", 0.5, Normalize(0.25, 0.75), "scorecard",

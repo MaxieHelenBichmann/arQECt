@@ -73,18 +73,19 @@ def test_parallelism_saturation_and_capacity_constrained_depth_bound():
     assert sc_result["parallelism_saturation"] == 0
     assert sc_result["capacity_constrained_depth_bound"] == 4
 
-    # ion slots: 4 1q gates (1 each) + 2 2q gates (2 each) = 8, 1 zone with capacity 2 -> 4 layers
-    assert analyze(CIRCUIT, TrappedIonsModel(2, 1, NATIVE_GATES))["parallelism_saturation"] == 4
-    assert analyze(CIRCUIT, TrappedIonsModel(4, 2, NATIVE_GATES))["parallelism_saturation"] == 1
+    # 6 gates (1q and 2q alike), one gate per zone at a time: 1 zone -> 6 layers, 2 zones -> 3 layers (zone capacity does not matter)
+    assert analyze(CIRCUIT, TrappedIonsModel(2, 1, NATIVE_GATES))["parallelism_saturation"] == 6
+    assert analyze(CIRCUIT, TrappedIonsModel(4, 1, NATIVE_GATES))["parallelism_saturation"] == 6
+    assert analyze(CIRCUIT, TrappedIonsModel(2, 2, NATIVE_GATES))["parallelism_saturation"] == 3
 
     # 2 2q gates, 1 entanglement pair -> 2 layers; 3 readouts, readout capacity 1 -> 3 layers
     na_result = analyze(CIRCUIT + "\nM 0 1 2", NeutralAtomsModel(1, 1, NATIVE_GATES))
     assert na_result["parallelism_saturation"] == 3
 
-    # 12 2q gates (6 per layer) exceed the depth 2 bound: 24 ion slots / (2 * 1) = 12 layers
-    ti_result = analyze("CX 0 1 2 3 4 5 6 7 8 9 10 11\nCX 0 1 2 3 4 5 6 7 8 9 10 11", TrappedIonsModel(2, 1, NATIVE_GATES))
+    # 12 2q gates (6 per layer) exceed the depth 2 bound: 12 gates / 2 zones = 6 layers
+    ti_result = analyze("CX 0 1 2 3 4 5 6 7 8 9 10 11\nCX 0 1 2 3 4 5 6 7 8 9 10 11", TrappedIonsModel(2, 2, NATIVE_GATES))
     assert ti_result["critical_path_depth"] == 2
-    assert ti_result["capacity_constrained_depth_bound"] == 12
+    assert ti_result["capacity_constrained_depth_bound"] == 6
 
 
 def test_window_congestion_is_zero_without_zone_limits():
@@ -95,18 +96,22 @@ def test_window_congestion_is_zero_without_zone_limits():
 
 
 def test_window_congestion_trapped_ions():
-    # 3 rigid 1q gates (3 ion slots) in each of the 2 layers, but only 2 slots
-    result = analyze("H 0 1 2\nH 0 1 2", TrappedIonsModel(2, 1, NATIVE_GATES))
+    # 3 rigid gates in each of the 2 layers, but only 2 zones (one gate each)
+    result = analyze("H 0 1 2\nH 0 1 2", TrappedIonsModel(2, 2, NATIVE_GATES))
     assert result["min_scheduling_window_congestion"] == 1.0
     assert result["max_scheduling_window_congestion"] == 1.0
 
-    # ion slots of must-execute gates never exceed the window capacity, but layers 2, 3, 4 have 5, 4, 3 slots of may-execute gates
+    # 1 zone: windows [1, 3], [1, 4], [2, 4] have more must-execute gates (4, 6, 4) than layers; every layer has >= 2 may-execute gates
     result = analyze(CIRCUIT, TrappedIonsModel(2, 1, NATIVE_GATES))
+    assert result["min_scheduling_window_congestion"] == pytest.approx(3 / 10)
+    assert result["max_scheduling_window_congestion"] == 1.0
+    # 2 zones: no window is congested, layers 2 and 3 have 3 may-execute gates each
+    result = analyze(CIRCUIT, TrappedIonsModel(2, 2, NATIVE_GATES))
     assert result["min_scheduling_window_congestion"] == 0.0
-    assert result["max_scheduling_window_congestion"] == 0.75
+    assert result["max_scheduling_window_congestion"] == 0.5
 
-    # 2q gates occupy 2 ion slots: 2 parallel CX need 4 slots
-    assert analyze("CX 0 1 2 3\nCX 0 1 2 3", TrappedIonsModel(2, 1, NATIVE_GATES))["min_scheduling_window_congestion"] == 1.0
+    # zone capacity does not matter, only the number of zones
+    assert analyze("CX 0 1 2 3\nCX 0 1 2 3", TrappedIonsModel(4, 1, NATIVE_GATES))["min_scheduling_window_congestion"] == 1.0
     assert analyze("CX 0 1 2 3\nCX 0 1 2 3", TrappedIonsModel(2, 2, NATIVE_GATES))["min_scheduling_window_congestion"] == 0.0
 
 

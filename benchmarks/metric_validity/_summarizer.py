@@ -22,6 +22,7 @@ TARGETS = {
     "schedule": {"TI": ["schedule_length"], "NA": ["schedule_length"], "SC": ["schedule_length"]}, # schedule length
     "idle": {"TI": ["idle_time"], "NA": ["idle_time"], "SC": ["idle_time"]},  # idle times
 }
+# derived target "stretch" (how far the compiled schedule stretches beyond the dependency-only optimum: schedule length / critical path depth)
 
 # hypotheses: per metric (that approximates runtime costs) whether lower (1) or higher (-1) values are better, and the cost it should predict/correspond to
 # runtime-cost metrics not evaluated: share_measurements, share_resets, share_mid_circuit_measurements (measurements / resets will not be changed during the compilation, so there is nothing to verify),
@@ -34,8 +35,8 @@ HYPOTHESES = {
         "parallelism_saturation": (1, "schedule"),
         "capacity_constrained_depth_bound": (1, "schedule"),
         "min_idle_steps": (1, "idle"),
-        "min_scheduling_window_congestion": (1, "schedule"),
-        "max_scheduling_window_congestion": (1, "schedule"),
+        "min_scheduling_window_congestion": (1, "stretch"),
+        "max_scheduling_window_congestion": (1, "stretch"),
         "average_asap_qubit_reuse": (-1, "idle"),
         "average_alap_qubit_reuse": (-1, "idle"),
         "average_asap_qubit_interaction": (1, "routing"),
@@ -83,6 +84,8 @@ def summarize(results_dir: Path) -> None:
         for target, values in TARGETS.items():
             if platform in values and all(value in circuit for value in values[platform]):
                 circuit[target] = sum(circuit[value] for value in values[platform])
+        if circuit.get("schedule") is not None and circuit.get("critical_path_depth"):
+            circuit["stretch"] = circuit["schedule"] / circuit["critical_path_depth"]
         strata[(platform, rows[0]["config"], rows[0]["compiler"])][rows[0]["circuit"]] = circuit
 
     families = sorted({c["family"] for circuits in strata.values() for c in circuits.values()})
