@@ -77,7 +77,9 @@ class SyndromeExtractionAnalyzer(MetricExtractor):
 
         initial = samples[:, :existent_measurements]
         extracted = samples[:, [existent_measurements + i for i in self.syndrome_measurements]]
-        result["syndrome_error_rate"] = int((extracted != initial[:, :g]).any(axis=1).sum()) / self.max_shots
+        wrong = int((extracted != initial[:, :g]).any(axis=1).sum())
+        result["syndrome_error_rate"] = wrong / self.max_shots
+        result["syndrome_error_rate_ci_lower"],result["syndrome_error_rate_ci_upper"] = self._confidence_interval(wrong, self.max_shots)
 
         # decode and count logical failures (differences between initial and final perfect measurements)
         difference = initial ^ samples[:, final_measurements:]
@@ -94,14 +96,15 @@ class SyndromeExtractionAnalyzer(MetricExtractor):
             ]
             failures += int(any(corrected))
 
-        result["n_failures"] = failures
         result["logical_error_rate"] = failures / self.max_shots
-
-        # 95% Wilson score confidence interval of the logical error rate
-        n, z = self.max_shots, 1.96
-        center = (failures / n + z**2 / (2 * n)) / (1 + z**2 / n)
-        half = z / (1 + z**2 / n) * (failures / n * (1 - failures / n) / n + z**2 / (4 * n**2)) ** 0.5
-        result["logical_error_rate_ci_lower"] = center - half
-        result["logical_error_rate_ci_upper"] = center + half
+        result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = self._confidence_interval(failures, self.max_shots)
 
         return result
+
+    def _confidence_interval(self, successes: int, trials: int) -> tuple[float | None, float | None]: # 95% Wilson score CI
+        z = 1.96
+        if trials:
+            center = (successes / trials + z**2 / (2 * trials)) / (1 + z**2 / trials)
+            half = z / (1 + z**2 / trials) * (successes / trials * (1 - successes / trials) / trials + z**2 / (4 * trials**2)) ** 0.5
+            return center - half, center + half
+        return None, None

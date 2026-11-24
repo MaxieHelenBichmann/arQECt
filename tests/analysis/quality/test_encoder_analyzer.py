@@ -44,7 +44,7 @@ def test_missing_or_mismatching_logical_qubits_raise():
 
 @pytest.mark.parametrize("path", ENCODERS, ids=lambda p: p.stem)
 def test_noiseless_encoder_has_no_failures(path: pathlib.Path):
-    assert analyze(stim.Circuit.from_file(path)).items() >= {"n_failures": 0, "logical_error_rate": 0.0}.items()
+    assert analyze(stim.Circuit.from_file(path)).items() >= {"logical_error_rate": 0.0}.items()
 
 
 @pytest.mark.parametrize("error", ["X 3", "Z 5", "Y 0"])

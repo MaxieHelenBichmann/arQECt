@@ -57,7 +57,7 @@ def test_extracted_stabilizers_generate_the_code():
 
 @pytest.mark.parametrize("path", EXTRACTORS, ids=lambda p: p.stem)
 def test_noiseless_extraction_has_no_failures(path: pathlib.Path):
-    assert analyze(stim.Circuit.from_file(path)).items() >= {"syndrome_error_rate": 0.0, "n_failures": 0, "logical_error_rate": 0.0}.items()
+    assert analyze(stim.Circuit.from_file(path)).items() >= {"syndrome_error_rate": 0.0, "logical_error_rate": 0.0}.items()
 
 
 def test_mismatching_stabilizer_order_shows_up_as_syndrome_errors():
