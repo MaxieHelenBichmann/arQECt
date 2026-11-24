@@ -26,10 +26,11 @@ def run(platforms: list[PlatformTag], max_qubits: int, max_compile_time: float, 
 
     if clean:
         for platform in platforms:
-            platform_dir = _RESULTS_DIR / platform.lower()
-            if platform_dir.exists():
-                shutil.rmtree(platform_dir)
-                print(f"Emptied {platform_dir}...")
+            for kind in ("raw", "plots"):
+                platform_dir = _RESULTS_DIR / kind / platform.lower()
+                if platform_dir.exists():
+                    shutil.rmtree(platform_dir)
+                    print(f"Emptied {platform_dir}...")
 
     collect(platforms, _CIRCUIT_DIR, _CONFIG_DIR, _RESULTS_DIR, max_qubits, max_compile_time)
     summarize(platforms, _RESULTS_DIR, max_qubits)

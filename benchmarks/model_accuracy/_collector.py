@@ -36,7 +36,7 @@ def collect(platforms: list[str], circuit_dir: Path, config_dir: Path, results_d
         for circuit_name, circuit in circuits.items():
             compilers = {}
             for compiler, run_compiler in _RUN_COMPILER[config["platform"]].items():
-                raw_file = results_dir / config["platform"].lower() / "raw" / f"{config['name']}__{circuit_name}__{compiler}.csv"
+                raw_file = results_dir / "raw" / config["platform"].lower() / f"{config['name']}__{circuit_name}__{compiler}.csv"
                 if raw_file.exists():
                     print(f"[{config["platform"]}] Skipping {circuit_name} on ({config["name"]}) with {compiler}: raw result already exists")
                 else:

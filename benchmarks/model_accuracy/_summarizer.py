@@ -28,14 +28,14 @@ def summarize(platform: list[str], results_dir: Path, max_qubits: int) -> None:
         if hardware not in platform:
             continue
         prefix = hardware.lower()
-        out_dir = results_dir / prefix / "plots"
+        out_dir = results_dir / "plots" / prefix
         out_dir.mkdir(parents=True, exist_ok=True)
         for old_file in out_dir.glob(f"{prefix}_*__*"):
             if old_file.is_file() and old_file.suffix in (".png", ".csv"):
                 old_file.unlink()
 
         runs = defaultdict(list)
-        for file in sorted((results_dir / prefix / "raw").glob("*.csv")):
+        for file in sorted((results_dir / "raw" / prefix).glob("*.csv")):
             with file.open(newline="") as f:
                 rows = list(csv.DictReader(f))
             if rows and int(rows[0]["num_qubits"]) <= max_qubits:

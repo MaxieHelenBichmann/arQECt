@@ -54,7 +54,7 @@ def visualize(platform: list[str], results_dir: Path) -> None:
     for hardware in ("TI", "NA", "SC"):
         if hardware not in platform:
             continue
-        for file in sorted((results_dir / hardware.lower() / "plots").glob("*__aggregated.csv")):
+        for file in sorted((results_dir / "plots" / hardware.lower()).glob("*__aggregated.csv")):
             file_prefix = str(file).removesuffix("__aggregated.csv")
             scores = read(file)
             visualize_aggregated(hardware, scores, file_prefix)
