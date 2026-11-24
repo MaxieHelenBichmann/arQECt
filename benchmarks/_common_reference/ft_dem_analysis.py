@@ -174,7 +174,93 @@ def run_dem_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, d
     }
 
 def run_dem_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_weight: int) -> dict:
-    return {}
+    reference = max(len(circuit_data.stabilizers[0]), noisy_circuit.num_qubits)
+    
+    targets = []
+    correlators = []
+    for i, (x, z) in enumerate(circuit_data.logical_operators):
+        targets += [x, z]
+        correlators += [x * stim.PauliString("_" * (reference + i) + "X"), z * stim.PauliString("_" * (reference + i) + "Z")]
+
+    # add necessary measurements to force / prepare one arbitrary Bell state between reference and logical qubits
+    observables = [*circuit_data.stabilizers, *correlators]
+    experiment = stim.Circuit()
+    for obs in observables:
+        experiment.append("MPP", list(stim.target_combined_paulis(obs)))
+    
+    m0 = experiment.num_measurements
+    experiment += noisy_circuit
+    m1 = experiment.num_measurements
+
+    # add necessary measurements to verify the preservation of the Bell state
+    for observable in observables:
+        experiment.append("MPP", list(stim.target_combined_paulis(observable)))
+
+    # add detectors / observables
+    n_meas = experiment.num_measurements
+    g = len(circuit_data.stabilizers)
+
+    for j in range(g): # D_0..D_(g-1) syndrome (state preservation)
+        experiment.append("DETECTOR", [stim.target_rec(j - n_meas), stim.target_rec(m1 + j - n_meas)])
+    for j, idx in enumerate(circuit_data.syndrome_measurements): # D_g..D_(2g-1) syndrome extraction: initial perfect vs noisily extracted stabilizer measurement
+        experiment.append("DETECTOR", [stim.target_rec(j - n_meas), stim.target_rec(m0 + idx - n_meas)])
+    for k in range(len(correlators)): # L_0..L_(2k-1) correlator operations (state preservation)
+        experiment.append("OBSERVABLE_INCLUDE", [stim.target_rec(g + k - n_meas), stim.target_rec(m1 + g + k - n_meas)], k)
+
+    # correct noiseless original circuit: unchanged stabilizers & correlators, extracted syndrome = initial syndrome
+    # --> detector/observable flips <--> changed syndrome bits | wrongly extracted syndrome bits | changed correlator measurement outcomes
+    dem = experiment.detector_error_model(approximate_disjoint_errors=True)
+
+    error_mechanisms = []  # (probability of mechanism, flip mask of mechanism): bit i = detector D_i, bit 2g + i = observable L_i
+    for inst in dem.flattened():
+        if inst.type == "error":
+            mask = 0
+            for t in inst.targets_copy():
+                if t.is_relative_detector_id():
+                    mask ^= 1 << t.val
+                elif t.is_logical_observable_id():
+                    mask ^= 1 << (2 * g + t.val)
+            error_mechanisms.append((inst.args_copy()[0], mask))
+    
+    # truncate: only consider fault sets S with at most max_weight fired error mechanisms
+    # --> probability of that exact fault set: P(S) = prod_{i not in S} (1 - p_i) * prod_{i in S} (p_i) = P(no fault at all, aka no mechanism fires) * prod_{i in S} p_i / (1 - p_i)
+    no_fault = np.prod([1 - p for p, _ in error_mechanisms])
+    outcomes = {} # cache: flip mask of fault set -> (wrongly extracted syndrome, syndrome correction failed because introduced log. operation)
+    total, wrong, failed = 0.0, 0.0, 0.0
+
+    for weight in range(max_weight + 1):
+        for faults in combinations(range(len(error_mechanisms)), weight):
+            prob, mask = no_fault, 0
+            for i in faults:
+                p, m = error_mechanisms[i]
+                prob *= p / (1 - p)
+                mask ^= m
+
+            if mask not in outcomes:
+                correction = decoder.decode(np.array([(mask >> j) & 1 for j in range(g)], dtype=np.uint8))
+                outcomes[mask] = (
+                    (mask >> g) % (1 << g) != 0,
+                    any(((mask >> (2 * g + k)) & 1) ^ (not correction.commutes(op)) for k, op in enumerate(targets))
+                )
+
+            syn, fail = outcomes[mask]
+            total += prob
+            wrong += prob * syn
+            failed += prob * fail
+
+    # not enumerated probability mass (fault sets with > max_weight faults) --> can be wrong / right , failed / successful --> worst/best case bounds
+    tail = 1 - total
+
+    return {
+        "n_mechanisms": len(error_mechanisms),
+        "truncation_tail": tail,
+        "syndrome_error_rate": wrong / total,
+        "syndrome_error_rate_lower": wrong,
+        "syndrome_error_rate_upper": wrong + tail,
+        "logical_error_rate": failed / total,
+        "logical_error_rate_lower": failed,
+        "logical_error_rate_upper": failed + tail,
+    }
 
 
 # -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
