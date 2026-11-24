@@ -103,4 +103,16 @@ class StatePreparationCircuitAnalyzer(MetricExtractor):
             failures += int(any(corrected))
 
         result["logical_error_rate"] = failures / len(accepted) if len(accepted) else None
+
+        # 95% Wilson score confidence interval of the logical error rate
+        n, z = len(accepted), 1.96
+        if n:
+            center = (failures / n + z**2 / (2 * n)) / (1 + z**2 / n)
+            half = z / (1 + z**2 / n) * (failures / n * (1 - failures / n) / n + z**2 / (4 * n**2)) ** 0.5
+            result["logical_error_rate_ci_lower"] = center - half
+            result["logical_error_rate_ci_upper"] = center + half
+        else:
+            result["logical_error_rate_ci_lower"] = None
+            result["logical_error_rate_ci_upper"] = None
+
         return result

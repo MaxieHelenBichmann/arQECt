@@ -106,7 +106,8 @@ def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, noisy_
         # analyses
         "max_shots": max_shots,
         **{f"{method}_{metric}": metrics.get(metric) for method, metrics in [("mc", mc_metrics), ("dem", dem_metrics)]
-           for metric in ["logical_error_rate", "acceptance_rate", "syndrome_error_rate"]},
+           for metric in ["logical_error_rate", "logical_error_rate_ci_lower", "logical_error_rate_ci_upper", "logical_error_rate_lower", "logical_error_rate_upper",
+                          "acceptance_rate", "acceptance_rate_lower", "acceptance_rate_upper", "syndrome_error_rate", "truncation_tail", "n_mechanisms"]},
     }
 
     file.parent.mkdir(parents=True, exist_ok=True)

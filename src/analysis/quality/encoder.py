@@ -82,4 +82,11 @@ class EncoderCircuitAnalyzer(MetricExtractor):
         result["n_failures"] = failures
         result["logical_error_rate"] = failures / self.max_shots
 
+        # 95% Wilson score confidence interval of the logical error rate
+        n, z = self.max_shots, 1.96
+        center = (failures / n + z**2 / (2 * n)) / (1 + z**2 / n)
+        half = z / (1 + z**2 / n) * (failures / n * (1 - failures / n) / n + z**2 / (4 * n**2)) ** 0.5
+        result["logical_error_rate_ci_lower"] = center - half
+        result["logical_error_rate_ci_upper"] = center + half
+
         return result
