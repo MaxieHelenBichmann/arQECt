@@ -43,7 +43,7 @@ if __name__ == "__main__":
     parser.add_argument("--function", nargs="+", choices=["StatePrep", "Encoding", "Syndrome"], default=["StatePrep", "Encoding", "Syndrome"],
                         help="only run analyses of these functions (default: all)")
     parser.add_argument("--max-qubits", type=int, default=sys.maxsize, help="skip circuits with more qubits (default: no limit)")
-    parser.add_argument("--max-shots", type=int, default=10_000, help="number of shots used for sampling")
+    parser.add_argument("--max-shots", type=int, default=1_000_000, help="number of shots used for sampling")
     parser.add_argument("--max-weight", type=int, default=3, help="maximum weight used for truncation of faults in the DEM")
     parser.add_argument("--clean", action="store_true",
                             help="delete all results (raw, intermediate csvs, plots) before running")
