@@ -30,7 +30,7 @@ def run(functions: list[CircuitFunction], max_qubits: int, max_shots: int) -> No
             continue
         print(f"Deleted {path}...")
 
-    collect(functions, _CIRCUIT_DIR, _CONFIG_DIR, _RESULTS_DIR, max_qubits)
+    collect(functions, _CIRCUIT_DIR, _CONFIG_DIR, _RESULTS_DIR, max_qubits, max_shots)
     summarize(_RESULTS_DIR)
     visualize(_RESULTS_DIR)
 

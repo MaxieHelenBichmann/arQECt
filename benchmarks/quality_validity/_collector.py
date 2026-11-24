@@ -1,12 +1,14 @@
 """Collect analysis results from the Monte-Carlo-Sampling-based approach and the Detector-Error-Model-based approach."""
 
 import csv
+from collections import Counter
 from pathlib import Path
 
 import stim
 import yaml
 
 from src.circuits.circuit import QECCircuit, CircuitFunction
+from src.models.hardware import HardwareModel
 
 from benchmarks._common_reference.ft_mc_analysis import _RUN_MONTE_CARLO
 from benchmarks._common_reference.ft_dem_analysis import _RUN_DETECTOR_ERROR_MODEL
@@ -46,13 +48,14 @@ def collect(functions: list[CircuitFunction], circuit_dir: Path, config_dir: Pat
     # run the analyses for each circuit
     for function in functions:
         for circuit_name, (circuit_file, circuit) in circuits[function].items():
-            raw_file = results_dir / "raw" / function.lower() / f"__{circuit_name}.csv"
-            if raw_file.exists():
-                print(f"[{function}] Skipping {circuit_name}: raw result already exists")
-                continue
+
+            qec_circuit = _PREPARE_CIRCUIT[function](circuit_file, circuit)
 
             for config in configs:
-                qec_circuit = _PREPARE_CIRCUIT[function](circuit_file, circuit)
+                raw_file = results_dir / "raw" / function.lower() / f"{config['name']}__{circuit_name}.csv"
+                if raw_file.exists():
+                    print(f"[{function}] Skipping {circuit_name} on {config['name']}: raw result already exists")
+                    continue
 
                 abstract_hardware, _ = _PREPARE_HARDWARE[config["platform"]](parameters=config["architecture"], num_qubits=circuit.num_qubits)
                 _, _, noisy_circuit = _RUN_ABSTRACTION[config["platform"]](hardware=abstract_hardware, circuit=circuit)
@@ -64,10 +67,50 @@ def collect(functions: list[CircuitFunction], circuit_dir: Path, config_dir: Pat
                 print(f"[{function}] Running detector error model analysis of noisy {circuit_name} on {config["name"]}...")
                 dem_metrics = _RUN_DETECTOR_ERROR_MODEL[function](circuit=qec_circuit)
 
-                save_raw_results(raw_file, qec_circuit, mc_metrics, dem_metrics)
+                save_raw_results(raw_file, circuit_file, qec_circuit, noisy_circuit, abstract_hardware, config, max_shots, mc_metrics, dem_metrics)
 
 
-def save_raw_results(file: Path, circuit: QECCircuit, mc_metrics: dict, dem_metrics: dict) -> None:
+def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, noisy_circuit: stim.Circuit, hardware: HardwareModel, hw_config: dict,
+                     max_shots: int, mc_metrics: dict, dem_metrics: dict) -> None:
+    gates = [(stim.gate_data(op.name), len(op.targets_copy())) for op in circuit.circuit]
+    noise_events = Counter()  # noise tag -> number of applied noise channels (2-qubit channels count once per pair)
+    for op in noisy_circuit:
+        if op.tag:
+            noise_events[op.tag] += len(op.targets_copy()) // (2 if stim.gate_data(op.name).is_two_qubit_gate else 1)
+    px, pz = hardware.noise_model.get_aggregated_probabilities()
+
+    row = {
+        # circuit
+        "circuit": circuit_file.stem,
+        "code": circuit_file.parent.parent.name,
+        "task": circuit_file.parent.name,
+        "function": circuit.function,
+        "state": circuit.quantum_state,
+        "num_qubits": circuit.circuit.num_qubits,
+        "num_data_qubits": len(circuit.stabilizers[0]),
+        "num_logical_qubits": len(circuit.logical_operators),
+        "num_stabilizers": len(circuit.stabilizers),
+        "num_1q_gates": sum(n for data, n in gates if data.is_single_qubit_gate and data.is_unitary),
+        "num_2q_gates": sum(n // 2 for data, n in gates if data.is_two_qubit_gate),
+        "num_measurements": circuit.circuit.num_measurements,
+        "num_resets": sum(n for data, n in gates if data.is_reset),
+        # hardware config
+        "config": hw_config["name"],
+        "platform": hw_config["platform"],
+        **{key: value for key, value in hw_config["architecture"].items() if key != "noise"},
+        **{f"noise_{key}": value for key, value in hw_config["architecture"].get("noise", {}).items()},
+        "noise_px": px,
+        "noise_pz": pz,
+        # abstract execution
+        **{f"noise_events_{tag}": noise_events[tag] for tag in ["1q", "2q", "idle", "hw", "reset", "meas"]},
+        # analyses
+        "max_shots": max_shots,
+        **{f"{method}_{metric}": metrics.get(metric) for method, metrics in [("mc", mc_metrics), ("dem", dem_metrics)]
+           for metric in ["logical_error_rate", "acceptance_rate", "syndrome_error_rate"]},
+    }
+
     file.parent.mkdir(parents=True, exist_ok=True)
     with open(file, "w", newline="") as f:
-        writer = csv.writer(f)
+        writer = csv.DictWriter(f, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
