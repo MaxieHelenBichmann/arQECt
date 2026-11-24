@@ -17,7 +17,7 @@ from benchmarks._common_reference.circuit_preparation import _PREPARE_CIRCUIT
 from benchmarks._common_reference.architecture_preparation import _PREPARE_HARDWARE
 from benchmarks._common_reference.abstract_execution import _RUN_ABSTRACTION
 
-def collect(functions: list[CircuitFunction], circuit_dir: Path, config_dir: Path, results_dir: Path, max_qubits: int, max_shots: int, max_weight: int) -> None:
+def collect(functions: list[CircuitFunction], circuit_dir: Path, config_dir: Path, results_dir: Path, max_qubits: int, max_shots: int, max_tail: float, max_fault_sets: int) -> None:
     # collect different circuits (with their task group folder)
     circuits : dict[CircuitFunction, dict[str, tuple[Path, stim.Circuit]]] = {"StatePrep": {}, "Encoding": {}, "Syndrome": {}}
     for circuit_file in sorted(circuit_dir.glob("*/*/*.stim")):
@@ -67,13 +67,13 @@ def collect(functions: list[CircuitFunction], circuit_dir: Path, config_dir: Pat
                 mc_metrics = _RUN_MONTE_CARLO[function](circuit_data=qec_circuit, noisy_circuit=noisy_circuit, decoder=decoder, max_shots=max_shots)
 
                 print(f"[{function}] Running detector error model analysis of noisy {circuit_name} on {config["name"]}...")
-                dem_metrics = _RUN_DETECTOR_ERROR_MODEL[function](circuit_data=qec_circuit, noisy_circuit=noisy_circuit, decoder=decoder, max_weight=max_weight)
+                dem_metrics = _RUN_DETECTOR_ERROR_MODEL[function](circuit_data=qec_circuit, noisy_circuit=noisy_circuit, decoder=decoder, max_tail=max_tail, max_fault_sets=max_fault_sets)
 
-                save_raw_results(raw_file, circuit_file, qec_circuit, config, max_shots, max_weight, mc_metrics, dem_metrics)
+                save_raw_results(raw_file, circuit_file, qec_circuit, config, max_shots, max_tail, max_fault_sets, mc_metrics, dem_metrics)
 
 
 def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, hw_config: dict,
-                     max_shots: int, max_weight: int, mc_metrics: dict, dem_metrics: dict) -> None:
+                     max_shots: int, max_tail: float, max_fault_sets: int, mc_metrics: dict, dem_metrics: dict) -> None:
     if not circuit.verification: # nothing to reject: rejection rate trivially 0 for both methods, not saved
         mc_metrics = {k: v for k, v in mc_metrics.items() if not k.startswith("rejection_rate")}
         dem_metrics = {k: v for k, v in dem_metrics.items() if not k.startswith("rejection_rate")}
@@ -93,7 +93,9 @@ def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, hw_con
         "platform": hw_config["platform"],
         # analyses
         "max_shots": max_shots,
-        "max_weight": max_weight,
+        "max_tail": max_tail,
+        "max_fault_sets": max_fault_sets,
+        "max_weight": dem_metrics["max_weight"], # dynamically reached truncation weight of the DEM
         **{f"{method}_{metric}": metrics.get(metric) for method, metrics in [("mc", mc_metrics), ("dem", dem_metrics)]
            for metric in ["logical_error_rate", "logical_error_rate_ci_lower", "logical_error_rate_ci_upper", "logical_error_rate_lower", "logical_error_rate_upper",
                           "rejection_rate", "rejection_rate_ci_lower", "rejection_rate_ci_upper", "rejection_rate_lower", "rejection_rate_upper",

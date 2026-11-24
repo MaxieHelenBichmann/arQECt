@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnchoredOffsetbox, PaddedBox, TextArea, VPacker
 
@@ -18,7 +19,9 @@ from benchmarks._common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY,
 from benchmarks.quality_validity._summarizer import load
 
 BASELINE, CI_BAR = "#c3c2b7", "#a9a8a0"
-OUTSIDE, ZERO = "#eb8a1e", "#9cc3f0" # runs with DEM outside the MC CI (red is the target: MC = DEM), runs without sampled MC failure
+OUTSIDE = "#eb8a1e" # runs with DEM outside the MC CI (red is the target: MC = DEM)
+WEIGHTS = LinearSegmentedColormap.from_list("weights", ["#b5d3f5", SERIES, "#0d366b"]) # lightness: truncation weight the DEM needed (light: few faults)
+WEIGHT_RANGE = (1, 6) # same color for the same weight in every plot
 LABELS = {
     "StatePrep": "State preparation", "Encoding": "Encoding", "Syndrome": "Syndrome extraction",
     "logical_error_rate": "logical error rate", "rejection_rate": "rejection rate", "syndrome_error_rate": "syndrome error rate",
@@ -36,17 +39,18 @@ def visualize(results_dir: Path) -> None:
         column = lambda key: np.array([float(r[key]) for r in rows])
         mc, mc_lo, mc_hi = column(f"mc_{metric}"), column(f"mc_{metric}_ci_lower"), column(f"mc_{metric}_ci_upper")
         dem, dem_lo, dem_hi = column(f"dem_{metric}"), column(f"dem_{metric}_lower"), column(f"dem_{metric}_upper")
+        weight = column("max_weight").astype(int)
 
         out_dir = results_dir / "plots" / function.lower()
         out_dir.mkdir(parents=True, exist_ok=True)
         title = f"{LABELS[function]}: {LABELS[metric]}, Monte Carlo (MC) vs detector error model (DEM)"
         subtitle = (f"{len(rows)} runs (circuits × hardware configurations),  MC: {int(float(rows[0]['max_shots'])):,} shots,  "
-                    f"DEM: fault sets with up to {rows[0]['max_weight']} faults")
-        plot_scatter(s, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, metric, title, subtitle, out_dir / f"{metric}__scatter.png")
+                    f"DEM: fault sets with up to {weight.min()}–{weight.max()} faults")
+        plot_scatter(s, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric, title, subtitle, out_dir / f"{metric}__scatter.png")
     print(f"Saved plots to {results_dir / 'plots'}")
 
 
-def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, metric: str, title: str, subtitle: str, file: Path) -> None:
+def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric: str, title: str, subtitle: str, file: Path) -> None:
     """MC vs DEM per run: on the diagonal if both agree, MC 95% CI vertical, DEM bounds horizontal."""
     fig, ax = plt.subplots(figsize=(7.6, 6.2), facecolor=SURFACE)
     inside = (dem >= mc_lo - 1e-12) & (dem <= mc_hi + 1e-12) # tolerance: float rounding of the Wilson bounds at rates 0 and 1
@@ -60,8 +64,10 @@ def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, metric: str, ti
     # intervals in the background (behind the diagonal and the markers)
     ax.errorbar(dem, y, yerr=np.clip([np.where(sampled, mc - mc_lo, 0), mc_hi - y], 0, None), fmt="none", ecolor=CI_BAR, alpha=0.4, linewidth=1, zorder=1) # clip float rounding
     ax.errorbar(dem, y, xerr=np.clip([dem - dem_lo, dem_hi - dem], 0, None), fmt="none", ecolor=CI_BAR, alpha=0.4, linewidth=1.5, zorder=1)
-    for mask, color in [(inside & sampled, SERIES), (~inside & sampled, OUTSIDE), (~sampled, ZERO)]:
-        ax.scatter(dem[mask], y[mask], color=color, s=30, alpha=0.8, edgecolors="none", zorder=5)
+    shade = lambda w: WEIGHTS((np.clip(w, *WEIGHT_RANGE) - WEIGHT_RANGE[0]) / (WEIGHT_RANGE[1] - WEIGHT_RANGE[0]))
+    ax.scatter(dem[inside & sampled], y[inside & sampled], color=shade(weight[inside & sampled]), s=30, alpha=0.8, edgecolors="none", zorder=5)
+    ax.scatter(dem[~inside & sampled], y[~inside & sampled], color=OUTSIDE, s=30, alpha=0.8, edgecolors="none", zorder=5)
+    ax.scatter(dem[~sampled], y[~sampled], facecolors="none", edgecolors=shade(weight[~sampled]), s=30, linewidths=1.2, alpha=0.8, zorder=5)
 
     ax.set_xlim(limits)
     ax.set_ylim(limits)
@@ -70,12 +76,15 @@ def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, metric: str, ti
     ax.minorticks_off()
 
     handles = [Line2D([], [], color=REFERENCE, linewidth=3), Line2D([], [], color=CI_BAR, linewidth=1), Line2D([], [], color=CI_BAR, linewidth=1.5),
-               Line2D([], [], marker="o", color=SERIES, linestyle="none"), Line2D([], [], marker="o", color=OUTSIDE, linestyle="none")]
+               Line2D([], [], marker="o", color=OUTSIDE, linestyle="none")]
     labels = ["exact agreement (MC = DEM)", "MC 95% confidence interval (Wilson, vertical)", "DEM bounds (truncated fault sets, horizontal)",
-              "run: DEM inside the MC 95% CI", "run: DEM outside the MC 95% CI"]
+              "run: DEM outside the MC 95% CI"]
     if not sampled.all(): # MC estimate 0 not drawable on a log axis
-        handles.append(Line2D([], [], marker="o", color=ZERO, linestyle="none"))
+        handles.append(Line2D([], [], marker="o", markerfacecolor="none", markeredgecolor=MUTED, linestyle="none"))
         labels.append("run: MC sampled 0 failures --> drawn at its upper CI end")
+    for w in sorted(set(weight)):
+        handles.append(Line2D([], [], marker="o", color=shade(w), linestyle="none"))
+        labels.append(f"run: DEM inside the MC 95% CI, enumerated up to {w} faults")
     width = (dem_hi - dem_lo)[dem > 0] / dem[dem > 0]
     lines = [f"DEM inside MC 95% CI     {float(s['dem_in_mc_ci']):>8.1%}   (expected ≈ 95%)",
              f"MC CI and DEM overlap     {float(s['intervals_overlap']):>8.1%}",
