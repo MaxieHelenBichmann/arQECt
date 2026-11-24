@@ -11,7 +11,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColormap
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnchoredOffsetbox, PaddedBox, TextArea, VPacker
 
@@ -82,9 +83,16 @@ def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric:
     if not sampled.all(): # MC estimate 0 not drawable on a log axis
         handles.append(Line2D([], [], marker="o", markerfacecolor="none", markeredgecolor=MUTED, linestyle="none"))
         labels.append("run: MC sampled 0 failures --> drawn at its upper CI end")
-    for w in sorted(set(weight)):
-        handles.append(Line2D([], [], marker="o", color=shade(w), linestyle="none"))
-        labels.append(f"run: DEM inside the MC 95% CI, enumerated up to {w} faults")
+    handles.append(Line2D([], [], marker="o", color=SERIES, linestyle="none"))
+    labels.append("run: DEM inside the MC 95% CI (shade: enumerated faults, see scale)")
+
+    # discrete scale: one color per truncation weight the DEM needed
+    levels = np.arange(WEIGHT_RANGE[0], WEIGHT_RANGE[1] + 1)
+    bar = fig.colorbar(ScalarMappable(BoundaryNorm(np.append(levels, levels[-1] + 1) - 0.5, len(levels)), ListedColormap(shade(levels))),
+                       ax=ax, ticks=levels, fraction=0.035, pad=0.03)
+    bar.set_label("DEM: fault sets enumerated up to ... faults", color=TEXT_SECONDARY, fontsize=9)
+    bar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9, length=0)
+    bar.outline.set_edgecolor(BASELINE)
     width = (dem_hi - dem_lo)[dem > 0] / dem[dem > 0]
     lines = [f"DEM inside MC 95% CI     {float(s['dem_in_mc_ci']):>8.1%}   (expected ≈ 95%)",
              f"MC CI and DEM overlap     {float(s['intervals_overlap']):>8.1%}",
