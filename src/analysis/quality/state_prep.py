@@ -84,7 +84,6 @@ class StatePreparationCircuitAnalyzer(MetricExtractor):
             accepted_mask &= samples[:, index] == expected
 
         accepted = samples[accepted_mask]
-        result["n_accepted"] = len(accepted)
         result["acceptance_rate"] = len(accepted) / self.max_shots
 
         # decode and count logical failures
@@ -103,7 +102,5 @@ class StatePreparationCircuitAnalyzer(MetricExtractor):
             ]
             failures += int(any(corrected))
 
-        result["n_failures"] = failures
         result["logical_error_rate"] = failures / len(accepted) if len(accepted) else None
-
         return result
