@@ -69,47 +69,31 @@ def collect(functions: list[CircuitFunction], circuit_dir: Path, config_dir: Pat
                 print(f"[{function}] Running detector error model analysis of noisy {circuit_name} on {config["name"]}...")
                 dem_metrics = _RUN_DETECTOR_ERROR_MODEL[function](circuit_data=qec_circuit, noisy_circuit=noisy_circuit, decoder=decoder, max_weight=max_weight)
 
-                save_raw_results(raw_file, circuit_file, qec_circuit, noisy_circuit, abstract_hardware, config, max_shots, mc_metrics, dem_metrics)
+                save_raw_results(raw_file, circuit_file, qec_circuit, config, max_shots, max_weight, mc_metrics, dem_metrics)
 
 
-def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, noisy_circuit: stim.Circuit, hardware: HardwareModel, hw_config: dict,
-                     max_shots: int, mc_metrics: dict, dem_metrics: dict) -> None:
-    gates = [(stim.gate_data(op.name), len(op.targets_copy())) for op in circuit.circuit]
-    noise_events = Counter()  # noise tag -> number of applied noise channels (2-qubit channels count once per pair)
-    for op in noisy_circuit:
-        if op.tag:
-            noise_events[op.tag] += len(op.targets_copy()) // (2 if stim.gate_data(op.name).is_two_qubit_gate else 1)
-    px, pz = hardware.noise_model.get_aggregated_probabilities()
-
+def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, hw_config: dict,
+                     max_shots: int, max_weight: int, mc_metrics: dict, dem_metrics: dict) -> None:
     row = {
         # circuit
         "circuit": circuit_file.stem,
         "code": circuit_file.parent.parent.name,
-        "task": circuit_file.parent.name,
         "function": circuit.function,
         "state": circuit.quantum_state,
         "num_qubits": circuit.circuit.num_qubits,
-        "num_data_qubits": len(circuit.stabilizers[0]),
         "num_logical_qubits": len(circuit.logical_operators),
         "num_stabilizers": len(circuit.stabilizers),
-        "num_1q_gates": sum(n for data, n in gates if data.is_single_qubit_gate and data.is_unitary),
-        "num_2q_gates": sum(n // 2 for data, n in gates if data.is_two_qubit_gate),
-        "num_measurements": circuit.circuit.num_measurements,
-        "num_resets": sum(n for data, n in gates if data.is_reset),
+        "num_gates": sum(len(op.targets_copy()) // (2 if stim.gate_data(op.name).is_two_qubit_gate else 1) for op in circuit.circuit), # 2-qubit gates count once per pair
         # hardware config
         "config": hw_config["name"],
         "platform": hw_config["platform"],
-        **{key: value for key, value in hw_config["architecture"].items() if key != "noise"},
-        **{f"noise_{key}": value for key, value in hw_config["architecture"].get("noise", {}).items()},
-        "noise_px": px,
-        "noise_pz": pz,
-        # abstract execution
-        **{f"noise_events_{tag}": noise_events[tag] for tag in ["1q", "2q", "idle", "hw", "reset", "meas"]},
         # analyses
         "max_shots": max_shots,
+        "max_weight": max_weight,
         **{f"{method}_{metric}": metrics.get(metric) for method, metrics in [("mc", mc_metrics), ("dem", dem_metrics)]
            for metric in ["logical_error_rate", "logical_error_rate_ci_lower", "logical_error_rate_ci_upper", "logical_error_rate_lower", "logical_error_rate_upper",
-                          "acceptance_rate", "acceptance_rate_lower", "acceptance_rate_upper", "syndrome_error_rate", "truncation_tail", "n_mechanisms"]},
+                          "acceptance_rate", "acceptance_rate_ci_lower", "acceptance_rate_ci_upper", "acceptance_rate_lower", "acceptance_rate_upper",
+                          "syndrome_error_rate", "syndrome_error_rate_ci_lower", "syndrome_error_rate_ci_upper", "syndrome_error_rate_lower", "syndrome_error_rate_upper", "truncation_tail", "n_mechanisms"]},
     }
 
     file.parent.mkdir(parents=True, exist_ok=True)
