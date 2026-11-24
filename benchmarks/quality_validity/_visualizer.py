@@ -21,7 +21,7 @@ BASELINE, CI_BAR = "#c3c2b7", "#a9a8a0"
 OUTSIDE, ZERO = "#eb8a1e", "#9cc3f0" # runs with DEM outside the MC CI (red is the target: MC = DEM), runs without sampled MC failure
 LABELS = {
     "StatePrep": "State preparation", "Encoding": "Encoding", "Syndrome": "Syndrome extraction",
-    "logical_error_rate": "logical error rate", "acceptance_rate": "acceptance rate", "syndrome_error_rate": "syndrome error rate",
+    "logical_error_rate": "logical error rate", "rejection_rate": "rejection rate", "syndrome_error_rate": "syndrome error rate",
 }
 
 
@@ -49,13 +49,12 @@ def visualize(results_dir: Path) -> None:
 def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, metric: str, title: str, subtitle: str, file: Path) -> None:
     """MC vs DEM per run: on the diagonal if both agree, MC 95% CI vertical, DEM bounds horizontal."""
     fig, ax = plt.subplots(figsize=(7.6, 6.2), facecolor=SURFACE)
-    log = metric != "acceptance_rate" # rates spanning orders of magnitude, acceptance rates close to 1
     inside = (dem >= mc_lo - 1e-12) & (dem <= mc_hi + 1e-12) # tolerance: float rounding of the Wilson bounds at rates 0 and 1
     sampled = mc > 0 # without sampled failure, MC only gives an upper bound (drawn at the upper end of its CI)
     y = np.where(sampled, mc, mc_hi)
 
     values = np.concatenate([dem_lo, dem_hi, mc_hi, mc[sampled]])
-    limits = (values[values > 0].min() / 2, values.max() * 2) if log else (values.min() - 0.005, 1.0025)
+    limits = (values[values > 0].min() / 2, values.max() * 2)
     ax.plot(limits, limits, color=REFERENCE, linewidth=3, zorder=2, label="exact agreement (MC = DEM)")
 
     # intervals in the background (behind the diagonal and the markers)
@@ -66,8 +65,8 @@ def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, metric: str, ti
 
     ax.set_xlim(limits)
     ax.set_ylim(limits)
-    ax.set_xscale("log" if log else "linear")
-    ax.set_yscale("log" if log else "linear")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
     ax.minorticks_off()
 
     handles = [Line2D([], [], color=REFERENCE, linewidth=3), Line2D([], [], color=CI_BAR, linewidth=1), Line2D([], [], color=CI_BAR, linewidth=1.5),
@@ -93,8 +92,8 @@ def style(fig, ax, title: str, subtitle: str, x_label: str, y_label: str, handle
     ax.spines[["top", "right"]].set_visible(False)
     ax.spines[["left", "bottom"]].set_color(BASELINE)
     ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9)
-    ax.set_title(title, loc="left", color=TEXT, fontsize=12, fontweight="bold", pad=22)
-    ax.text(0, 1.02, subtitle, transform=ax.transAxes, va="bottom", ha="left", color=TEXT_SECONDARY, fontsize=9)
+    ax.set_title(title, loc="center", color=TEXT, fontsize=12, fontweight="bold", pad=22)
+    ax.text(0.5, 1.02, subtitle, transform=ax.transAxes, va="bottom", ha="center", color=TEXT_SECONDARY, fontsize=9)
     ax.set_xlabel(x_label, color=TEXT_SECONDARY, fontsize=10)
     ax.set_ylabel(y_label, color=TEXT_SECONDARY, fontsize=10)
     fig.tight_layout()

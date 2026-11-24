@@ -87,9 +87,9 @@ def run_dem_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, d
     return {
         "n_mechanisms": len(error_mechanisms),
         "truncation_tail": tail,
-        "acceptance_rate": accepted / total,
-        "acceptance_rate_lower": accepted,
-        "acceptance_rate_upper": accepted + tail,
+        "rejection_rate": (total - accepted) / total,
+        "rejection_rate_lower": total - accepted,
+        "rejection_rate_upper": total - accepted + tail,
         "logical_error_rate": failed / accepted,
         "logical_error_rate_lower": failed / (accepted + tail),
         "logical_error_rate_upper": (failed + tail) / (accepted + tail),

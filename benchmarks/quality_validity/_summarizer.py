@@ -11,7 +11,7 @@ import numpy as np
 
 # compared metrics per circuit function
 METRICS = {
-    "StatePrep": ["logical_error_rate", "acceptance_rate"],
+    "StatePrep": ["logical_error_rate", "rejection_rate"],
     "Encoding": ["logical_error_rate"],
     "Syndrome": ["logical_error_rate", "syndrome_error_rate"],
 }

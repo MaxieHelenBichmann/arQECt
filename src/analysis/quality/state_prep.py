@@ -84,8 +84,9 @@ class StatePreparationCircuitAnalyzer(MetricExtractor):
             accepted_mask &= samples[:, index] == expected
 
         accepted = samples[accepted_mask]
-        result["acceptance_rate"] = len(accepted) / self.max_shots
-        result["acceptance_rate_ci_lower"], result["acceptance_rate_ci_upper"] = self._confidence_interval(len(accepted), self.max_shots)
+        rejected = self.max_shots - len(accepted)
+        result["rejection_rate"] = rejected / self.max_shots
+        result["rejection_rate_ci_lower"], result["rejection_rate_ci_upper"] = self._confidence_interval(rejected, self.max_shots)
 
         # decode and count logical failures
         g = len(self.stabilizers)

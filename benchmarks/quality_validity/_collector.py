@@ -74,6 +74,10 @@ def collect(functions: list[CircuitFunction], circuit_dir: Path, config_dir: Pat
 
 def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, hw_config: dict,
                      max_shots: int, max_weight: int, mc_metrics: dict, dem_metrics: dict) -> None:
+    if not circuit.verification: # nothing to reject: rejection rate trivially 0 for both methods, not saved
+        mc_metrics = {k: v for k, v in mc_metrics.items() if not k.startswith("rejection_rate")}
+        dem_metrics = {k: v for k, v in dem_metrics.items() if not k.startswith("rejection_rate")}
+
     row = {
         # circuit
         "circuit": circuit_file.stem,
@@ -92,7 +96,7 @@ def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, hw_con
         "max_weight": max_weight,
         **{f"{method}_{metric}": metrics.get(metric) for method, metrics in [("mc", mc_metrics), ("dem", dem_metrics)]
            for metric in ["logical_error_rate", "logical_error_rate_ci_lower", "logical_error_rate_ci_upper", "logical_error_rate_lower", "logical_error_rate_upper",
-                          "acceptance_rate", "acceptance_rate_ci_lower", "acceptance_rate_ci_upper", "acceptance_rate_lower", "acceptance_rate_upper",
+                          "rejection_rate", "rejection_rate_ci_lower", "rejection_rate_ci_upper", "rejection_rate_lower", "rejection_rate_upper",
                           "syndrome_error_rate", "syndrome_error_rate_ci_lower", "syndrome_error_rate_ci_upper", "syndrome_error_rate_lower", "syndrome_error_rate_upper", "truncation_tail", "n_mechanisms"]},
     }
 

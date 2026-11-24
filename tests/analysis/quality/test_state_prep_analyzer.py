@@ -37,7 +37,7 @@ def test_missing_state_raises():
 
 @pytest.mark.parametrize("circuit", [PREP, FT_PREP])
 def test_noiseless_preparation_has_no_failures(circuit: stim.Circuit):
-    assert analyze(circuit).items() >= {"acceptance_rate": 1.0, "logical_error_rate": 0.0}.items()
+    assert analyze(circuit).items() >= {"rejection_rate": 0.0, "logical_error_rate": 0.0}.items()
 
 
 def test_wrong_target_state_always_fails():
@@ -67,16 +67,16 @@ def test_rejected_shots_are_discarded():
     flagged_error = PREP + stim.Circuit("X_ERROR(0.3) 7\nCX 7 0 7 1 7 2 7 3 7 4 7 5 7 6\nM 7")
 
     without_verification = analyze(flagged_error)
-    assert without_verification["acceptance_rate"] == 1.0
+    assert without_verification["rejection_rate"] == 0.0
     assert 0.2 < without_verification["logical_error_rate"] < 0.4
 
     with_verification = analyze(flagged_error, accept_if={0: 0})
-    assert 0.6 < with_verification["acceptance_rate"] < 0.8
+    assert 0.2 < with_verification["rejection_rate"] < 0.4
     assert with_verification["logical_error_rate"] == 0.0
 
 
 def test_no_accepted_shots_gives_undefined_error_rate():
     result = analyze(PREP + stim.Circuit("X 7\nM 7"), accept_if={0: 0})
 
-    assert result["acceptance_rate"] == 0.0
+    assert result["rejection_rate"] == 1.0
     assert result["logical_error_rate"] is None
