@@ -69,11 +69,11 @@ class CircuitAnalyzer:
 
             match circuit.function:
                 case "StatePrep": 
-                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, accept_if=circuit.verification, state=circuit.quantum_state) ]
+                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware.noisy_circuit, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, accept_if=circuit.verification, state=circuit.quantum_state) ]
                 case "Encoding": 
-                    quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, logical_qubits=circuit.logical_qubits) ]
+                    quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware.noisy_circuit, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, logical_qubits=circuit.logical_qubits) ]
                 case "Syndrome": 
-                    quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, syndrome_measurements=circuit.syndrome_measurements) ]
+                    quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware.noisy_circuit, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, syndrome_measurements=circuit.syndrome_measurements) ]
                 case _:
                     quality_analyzer = []
 

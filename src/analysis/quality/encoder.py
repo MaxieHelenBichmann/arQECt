@@ -27,8 +27,8 @@ if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
 
 class EncoderCircuitAnalyzer(MetricExtractor):
-    def __init__(self, hardware: HardwareModel, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString, stim.PauliString]], max_shots: int, decoder: Decoder, logical_qubits: list[int] | None = None):
-        self.hw = hardware
+    def __init__(self, noisy_circuit: stim.Circuit, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString, stim.PauliString]], max_shots: int, decoder: Decoder, logical_qubits: list[int] | None = None):
+        self.noisy_circuit = noisy_circuit
         self.stabilizers = stabilizers
         self.logical_operators = logical_operators
         if logical_qubits is None or len(logical_qubits) != len(logical_operators):
@@ -41,7 +41,7 @@ class EncoderCircuitAnalyzer(MetricExtractor):
         result : dict[str, object] = {}
 
         # entangle each input qubit with a noiseless reference qubit (Bell pair)
-        reference = max(len(self.stabilizers[0]), self.hw.noisy_circuit.num_qubits) # first reference qubit index, after all circuit qubits
+        reference = max(len(self.stabilizers[0]), self.noisy_circuit.num_qubits) # first reference qubit index, after all circuit qubits
 
         experiment = stim.Circuit()
         for i, q in enumerate(self.logical_qubits):
@@ -49,7 +49,7 @@ class EncoderCircuitAnalyzer(MetricExtractor):
             experiment.append("CX", [reference + i, q])
 
         # run experiment with multiple shots
-        experiment += self.hw.noisy_circuit
+        experiment += self.noisy_circuit
         existent_measurements = experiment.num_measurements
 
         targets = []

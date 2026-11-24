@@ -27,7 +27,7 @@ def hardware(noisy_circuit: stim.Circuit) -> SuperconductingQubitsModel:
 
 def analyze(noisy_circuit: stim.Circuit, state="0", accept_if=None) -> dict[str, object]:
     hw = hardware(noisy_circuit)
-    return StatePreparationCircuitAnalyzer(hw, STABILIZERS, LOGICAL_OPERATORS, SHOTS, BeliefPropOrdStat(hw, STABILIZERS), accept_if, state).analyze()
+    return StatePreparationCircuitAnalyzer(hw.noisy_circuit, STABILIZERS, LOGICAL_OPERATORS, SHOTS, BeliefPropOrdStat(hw, STABILIZERS), accept_if, state).analyze()
 
 
 def test_missing_state_raises():
@@ -37,7 +37,7 @@ def test_missing_state_raises():
 
 @pytest.mark.parametrize("circuit", [PREP, FT_PREP])
 def test_noiseless_preparation_has_no_failures(circuit: stim.Circuit):
-    assert analyze(circuit) == {"n_accepted": SHOTS, "acceptance_rate": 1.0, "n_failures": 0, "logical_error_rate": 0.0}
+    assert analyze(circuit).items() >= {"acceptance_rate": 1.0, "logical_error_rate": 0.0}.items()
 
 
 def test_wrong_target_state_always_fails():
@@ -72,12 +72,11 @@ def test_rejected_shots_are_discarded():
 
     with_verification = analyze(flagged_error, accept_if={0: 0})
     assert 0.6 < with_verification["acceptance_rate"] < 0.8
-    assert with_verification["n_accepted"] == round(with_verification["acceptance_rate"] * SHOTS)
     assert with_verification["logical_error_rate"] == 0.0
 
 
 def test_no_accepted_shots_gives_undefined_error_rate():
     result = analyze(PREP + stim.Circuit("X 7\nM 7"), accept_if={0: 0})
 
-    assert result["n_accepted"] == 0
+    assert result["acceptance_rate"] == 0.0
     assert result["logical_error_rate"] is None

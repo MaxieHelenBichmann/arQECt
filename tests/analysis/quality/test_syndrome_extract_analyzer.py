@@ -33,7 +33,7 @@ def analyze(circuit: stim.Circuit, noisy_circuit: stim.Circuit | None = None, st
     hw = SuperconductingQubitsModel(circuit.num_qubits, DURATIONS, {4: circuit.num_qubits}, {"H", "CX", "M", "R"})
     hw.noisy_circuit = circuit if noisy_circuit is None else noisy_circuit
     decoder = BeliefPropOrdStat(hw, stabilizers)
-    return SyndromeExtractionAnalyzer(hw, stabilizers, LOGICAL_OPERATORS, SHOTS, decoder, list(range(len(stabilizers)))).analyze()
+    return SyndromeExtractionAnalyzer(hw.noisy_circuit, stabilizers, LOGICAL_OPERATORS, SHOTS, decoder, list(range(len(stabilizers)))).analyze()
 
 
 def test_missing_or_mismatching_syndrome_measurements_raise():
@@ -42,9 +42,9 @@ def test_missing_or_mismatching_syndrome_measurements_raise():
     decoder = BeliefPropOrdStat(hw, stabilizers)
 
     with pytest.raises(ValueError):
-        SyndromeExtractionAnalyzer(hw, stabilizers, LOGICAL_OPERATORS, SHOTS, decoder, None)
+        SyndromeExtractionAnalyzer(hw.noisy_circuit, stabilizers, LOGICAL_OPERATORS, SHOTS, decoder, None)
     with pytest.raises(ValueError):
-        SyndromeExtractionAnalyzer(hw, stabilizers, LOGICAL_OPERATORS, SHOTS, decoder, [0, 1, 2])
+        SyndromeExtractionAnalyzer(hw.noisy_circuit, stabilizers, LOGICAL_OPERATORS, SHOTS, decoder, [0, 1, 2])
 
 
 def test_extracted_stabilizers_generate_the_code():
@@ -57,7 +57,7 @@ def test_extracted_stabilizers_generate_the_code():
 
 @pytest.mark.parametrize("path", EXTRACTORS, ids=lambda p: p.stem)
 def test_noiseless_extraction_has_no_failures(path: pathlib.Path):
-    assert analyze(stim.Circuit.from_file(path)) == {"syndrome_error_rate": 0.0, "n_failures": 0, "logical_error_rate": 0.0}
+    assert analyze(stim.Circuit.from_file(path)).items() >= {"syndrome_error_rate": 0.0, "n_failures": 0, "logical_error_rate": 0.0}.items()
 
 
 def test_mismatching_stabilizer_order_shows_up_as_syndrome_errors():

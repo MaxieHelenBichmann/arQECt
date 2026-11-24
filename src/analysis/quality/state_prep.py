@@ -47,8 +47,8 @@ if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
 
 class StatePreparationCircuitAnalyzer(MetricExtractor):
-    def __init__(self, hardware: HardwareModel, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString, stim.PauliString]], max_shots: int, decoder: Decoder, accept_if: dict[int, int] | None = None, state: QuantumState | None = None):
-        self.hw = hardware
+    def __init__(self, noisy_circuit: stim.Circuit, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString, stim.PauliString]], max_shots: int, decoder: Decoder, accept_if: dict[int, int] | None = None, state: QuantumState | None = None):
+        self.noisy_circuit = noisy_circuit
         self.stabilizers = stabilizers
         match state:
             case "0":
@@ -69,7 +69,7 @@ class StatePreparationCircuitAnalyzer(MetricExtractor):
         result : dict[str, object] = {}
 
         # run experiment with multiple shots
-        experiment = self.hw.noisy_circuit.copy()
+        experiment = self.noisy_circuit.copy()
         existent_measurements = experiment.num_measurements
 
         for observable in [*self.stabilizers, *self.target_logicals]:

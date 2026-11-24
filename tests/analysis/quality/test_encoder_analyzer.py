@@ -28,7 +28,7 @@ def analyze(circuit: stim.Circuit, noisy_circuit: stim.Circuit | None = None) ->
     hw = SuperconductingQubitsModel(circuit.num_qubits, DURATIONS, {2: circuit.num_qubits}, {"H", "CX", "M", "R"})
     hw.noisy_circuit = circuit if noisy_circuit is None else noisy_circuit
     qubits, operators = logicals(circuit)
-    return EncoderCircuitAnalyzer(hw, STABILIZERS, operators, SHOTS, BeliefPropOrdStat(hw, STABILIZERS), qubits).analyze()
+    return EncoderCircuitAnalyzer(hw.noisy_circuit, STABILIZERS, operators, SHOTS, BeliefPropOrdStat(hw, STABILIZERS), qubits).analyze()
 
 
 def test_missing_or_mismatching_logical_qubits_raise():
@@ -37,14 +37,14 @@ def test_missing_or_mismatching_logical_qubits_raise():
     decoder = BeliefPropOrdStat(hw, STABILIZERS)
 
     with pytest.raises(ValueError):
-        EncoderCircuitAnalyzer(hw, STABILIZERS, operators, SHOTS, decoder, None)
+        EncoderCircuitAnalyzer(hw.noisy_circuit, STABILIZERS, operators, SHOTS, decoder, None)
     with pytest.raises(ValueError):
-        EncoderCircuitAnalyzer(hw, STABILIZERS, operators, SHOTS, decoder, [0, 1])
+        EncoderCircuitAnalyzer(hw.noisy_circuit, STABILIZERS, operators, SHOTS, decoder, [0, 1])
 
 
 @pytest.mark.parametrize("path", ENCODERS, ids=lambda p: p.stem)
 def test_noiseless_encoder_has_no_failures(path: pathlib.Path):
-    assert analyze(stim.Circuit.from_file(path)) == {"n_failures": 0, "logical_error_rate": 0.0}
+    assert analyze(stim.Circuit.from_file(path)).items() >= {"n_failures": 0, "logical_error_rate": 0.0}.items()
 
 
 @pytest.mark.parametrize("error", ["X 3", "Z 5", "Y 0"])

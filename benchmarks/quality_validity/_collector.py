@@ -9,6 +9,7 @@ import yaml
 
 from src.circuits.circuit import QECCircuit, CircuitFunction
 from src.models.hardware import HardwareModel
+from src.analysis.quality._decoder import BeliefPropOrdStat
 
 from benchmarks._common_reference.ft_mc_analysis import _RUN_MONTE_CARLO
 from benchmarks._common_reference.ft_dem_analysis import _RUN_DETECTOR_ERROR_MODEL
@@ -16,7 +17,7 @@ from benchmarks._common_reference.circuit_preparation import _PREPARE_CIRCUIT
 from benchmarks._common_reference.architecture_preparation import _PREPARE_HARDWARE
 from benchmarks._common_reference.abstract_execution import _RUN_ABSTRACTION
 
-def collect(functions: list[CircuitFunction], circuit_dir: Path, config_dir: Path, results_dir: Path, max_qubits: int, max_shots: int) -> None:
+def collect(functions: list[CircuitFunction], circuit_dir: Path, config_dir: Path, results_dir: Path, max_qubits: int, max_shots: int, max_weight: int) -> None:
     # collect different circuits (with their task group folder)
     circuits : dict[CircuitFunction, dict[str, tuple[Path, stim.Circuit]]] = {"StatePrep": {}, "Encoding": {}, "Syndrome": {}}
     for circuit_file in sorted(circuit_dir.glob("*/*/*.stim")):
@@ -59,13 +60,14 @@ def collect(functions: list[CircuitFunction], circuit_dir: Path, config_dir: Pat
 
                 abstract_hardware, _ = _PREPARE_HARDWARE[config["platform"]](parameters=config["architecture"], num_qubits=circuit.num_qubits)
                 _, _, noisy_circuit = _RUN_ABSTRACTION[config["platform"]](hardware=abstract_hardware, circuit=circuit)
-                abstract_hardware.noisy_circuit = noisy_circuit
+
+                decoder = BeliefPropOrdStat(abstract_hardware, qec_circuit.stabilizers)
 
                 print(f"[{function}] Running monte carlo analysis of noisy {circuit_name} on {config["name"]}...")
-                mc_metrics = _RUN_MONTE_CARLO[function](circuit=qec_circuit, hw=abstract_hardware, max_shots=max_shots)
+                mc_metrics = _RUN_MONTE_CARLO[function](circuit_data=qec_circuit, noisy_circuit=noisy_circuit, decoder=decoder, max_shots=max_shots)
 
                 print(f"[{function}] Running detector error model analysis of noisy {circuit_name} on {config["name"]}...")
-                dem_metrics = _RUN_DETECTOR_ERROR_MODEL[function](circuit=qec_circuit)
+                dem_metrics = _RUN_DETECTOR_ERROR_MODEL[function](circuit_data=qec_circuit, noisy_circuit=noisy_circuit, decoder=decoder, max_weight=max_weight)
 
                 save_raw_results(raw_file, circuit_file, qec_circuit, noisy_circuit, abstract_hardware, config, max_shots, mc_metrics, dem_metrics)
 

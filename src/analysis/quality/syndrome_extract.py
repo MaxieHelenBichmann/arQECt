@@ -34,8 +34,8 @@ if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
 
 class SyndromeExtractionAnalyzer(MetricExtractor):
-    def __init__(self, hardware: HardwareModel, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString, stim.PauliString]], max_shots: int, decoder: Decoder, syndrome_measurements: list[int] | None = None):
-        self.hw = hardware
+    def __init__(self, noisy_circuit: stim.Circuit, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString, stim.PauliString]], max_shots: int, decoder: Decoder, syndrome_measurements: list[int] | None = None):
+        self.noisy_circuit = noisy_circuit
         self.stabilizers = stabilizers
         self.logical_operators = logical_operators
         if syndrome_measurements is None or len(syndrome_measurements) != len(stabilizers):
@@ -47,7 +47,7 @@ class SyndromeExtractionAnalyzer(MetricExtractor):
     def analyze(self) -> dict[str, object]:
         result : dict[str, object] = {}
 
-        reference = max(len(self.stabilizers[0]), self.hw.noisy_circuit.num_qubits) # first reference qubit index, after all circuit qubits
+        reference = max(len(self.stabilizers[0]), self.noisy_circuit.num_qubits) # first reference qubit index, after all circuit qubits
 
         targets = []
         correlators = []
@@ -64,7 +64,7 @@ class SyndromeExtractionAnalyzer(MetricExtractor):
         existent_measurements = experiment.num_measurements
 
         # run experiment with multiple shots
-        experiment += self.hw.noisy_circuit
+        experiment += self.noisy_circuit
         final_measurements = experiment.num_measurements
 
         for observable in observables:
