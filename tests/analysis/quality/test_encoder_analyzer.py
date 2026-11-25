@@ -13,7 +13,8 @@ STABILIZERS = [stim.PauliString(s) for s in (CODE_DIR / "stabilizers.txt").read_
 ENCODERS = sorted((CODE_DIR / "encoding").glob("*.stim"))
 STANDARD = stim.Circuit.from_file(CODE_DIR / "encoding/steane-code--standard-encoding.stim")
 DURATIONS: dict[GateKind, float] = {"SN": 1.0, "EN": 2.0, "MS": 5.0}
-SHOTS = 500
+MAX_FAULT_SETS = 1_000_000
+MAX_REL_TAIL = 0.01
 
 
 def logicals(circuit: stim.Circuit) -> tuple[list[int], list[tuple[stim.PauliString, stim.PauliString]]]:
@@ -28,7 +29,7 @@ def analyze(circuit: stim.Circuit, noisy_circuit: stim.Circuit | None = None) ->
     hw = SuperconductingQubitsModel(circuit.num_qubits, DURATIONS, {2: circuit.num_qubits}, {"H", "CX", "M", "R"})
     hw.noisy_circuit = circuit if noisy_circuit is None else noisy_circuit
     qubits, operators = logicals(circuit)
-    return EncoderCircuitAnalyzer(hw.noisy_circuit, STABILIZERS, operators, SHOTS, BeliefPropOrdStat(hw, STABILIZERS), qubits).analyze()
+    return EncoderCircuitAnalyzer(hw.noisy_circuit, STABILIZERS, operators, MAX_FAULT_SETS, MAX_REL_TAIL, BeliefPropOrdStat(hw, STABILIZERS), qubits).analyze()
 
 
 def test_missing_or_mismatching_logical_qubits_raise():
@@ -37,9 +38,9 @@ def test_missing_or_mismatching_logical_qubits_raise():
     decoder = BeliefPropOrdStat(hw, STABILIZERS)
 
     with pytest.raises(ValueError):
-        EncoderCircuitAnalyzer(hw.noisy_circuit, STABILIZERS, operators, SHOTS, decoder, None)
+        EncoderCircuitAnalyzer(hw.noisy_circuit, STABILIZERS, operators, MAX_FAULT_SETS, MAX_REL_TAIL, decoder, None)
     with pytest.raises(ValueError):
-        EncoderCircuitAnalyzer(hw.noisy_circuit, STABILIZERS, operators, SHOTS, decoder, [0, 1])
+        EncoderCircuitAnalyzer(hw.noisy_circuit, STABILIZERS, operators, MAX_FAULT_SETS, MAX_REL_TAIL, decoder, [0, 1])
 
 
 @pytest.mark.parametrize("path", ENCODERS, ids=lambda p: p.stem)
@@ -47,9 +48,10 @@ def test_noiseless_encoder_has_no_failures(path: pathlib.Path):
     assert analyze(stim.Circuit.from_file(path)).items() >= {"logical_error_rate": 0.0}.items()
 
 
-@pytest.mark.parametrize("error", ["X 3", "Z 5", "Y 0"])
+# the DEM measures flips relative to the noiseless circuit, so errors have to be noise (deterministic Paulis are part of the reference)
+@pytest.mark.parametrize("error", ["X_ERROR(0.1) 3", "Z_ERROR(0.1) 5", "Y_ERROR(0.1) 0"])
 def test_single_qubit_error_after_encoding_is_corrected(error: str):
-    assert analyze(STANDARD, STANDARD + stim.Circuit(error))["logical_error_rate"] == 0.0
+    assert analyze(STANDARD, STANDARD + stim.Circuit(error))["logical_error_rate"] == pytest.approx(0.0)
 
 
 @pytest.mark.parametrize("pauli", ["X", "Y", "Z"])
@@ -57,16 +59,13 @@ def test_every_logical_error_after_encoding_is_detected(pauli: str):
     # the Bell pair with the reference checks X_L and Z_L at once, so X_L, Y_L and Z_L all fail
     _, [(x, z)] = logicals(STANDARD)
     operator = {"X": x, "Z": z, "Y": x * z}[pauli]
-    error = stim.Circuit()
-    for q in range(len(operator)):
-        if operator[q]:
-            error.append("XYZ"[operator[q] - 1], [q])
+    error = stim.Circuit("E(0.1) " + " ".join(f"{'XYZ'[operator[q] - 1]}{q}" for q in range(len(operator)) if operator[q]))
 
-    assert analyze(STANDARD, STANDARD + error)["logical_error_rate"] == 1.0
+    assert analyze(STANDARD, STANDARD + error)["logical_error_rate"] == pytest.approx(0.1)
 
 
 @pytest.mark.parametrize("pauli", ["X", "Z"])
 def test_error_on_input_qubit_before_encoding_is_a_logical_error(pauli: str):
     [q], _ = logicals(STANDARD)
 
-    assert analyze(STANDARD, stim.Circuit(f"{pauli} {q}") + STANDARD)["logical_error_rate"] == 1.0
+    assert analyze(STANDARD, stim.Circuit(f"{pauli}_ERROR(0.1) {q}") + STANDARD)["logical_error_rate"] == pytest.approx(0.1)

@@ -25,6 +25,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import stim
+from itertools import combinations
+from math import comb
+import numpy as np
 
 from src.analysis.quality._decoder import Decoder
 
@@ -34,77 +37,110 @@ if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
 
 class SyndromeExtractionAnalyzer(MetricExtractor):
-    def __init__(self, noisy_circuit: stim.Circuit, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString, stim.PauliString]], max_shots: int, decoder: Decoder, syndrome_measurements: list[int] | None = None):
+    def __init__(self, noisy_circuit: stim.Circuit, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString, stim.PauliString]], max_fault_sets: int, max_rel_tail: int, decoder: Decoder, syndrome_measurements: list[int] | None = None):
         self.noisy_circuit = noisy_circuit
         self.stabilizers = stabilizers
         self.logical_operators = logical_operators
         if syndrome_measurements is None or len(syndrome_measurements) != len(stabilizers):
             raise ValueError("A syndrome extraction circuit needs to specify one measurement per stabilizer.")
         self.syndrome_measurements = syndrome_measurements
-        self.max_shots = max_shots
+        self.max_fault_sets = max_fault_sets
+        self.max_rel_tail = max_rel_tail
         self.decoder = decoder
 
     def analyze(self) -> dict[str, object]:
         result : dict[str, object] = {}
 
-        reference = max(len(self.stabilizers[0]), self.noisy_circuit.num_qubits) # first reference qubit index, after all circuit qubits
-
+        reference = max(len(self.stabilizers[0]), self.noisy_circuit.num_qubits)
+        
         targets = []
         correlators = []
         for i, (x, z) in enumerate(self.logical_operators):
             targets += [x, z]
             correlators += [x * stim.PauliString("_" * (reference + i) + "X"), z * stim.PauliString("_" * (reference + i) + "Z")]
 
+        # add necessary measurements to force / prepare one arbitrary Bell state between reference and logical qubits
         observables = [*self.stabilizers, *correlators]
-
-        # ideal input state: noiseless projection onto stabilizers + logical Bell pairs with reference qubits
         experiment = stim.Circuit()
-        for observable in observables:
-            experiment.append("MPP", list(stim.target_combined_paulis(observable)))
-        existent_measurements = experiment.num_measurements
-
-        # run experiment with multiple shots
+        for obs in observables:
+            experiment.append("MPP", list(stim.target_combined_paulis(obs)))
+        
+        m0 = experiment.num_measurements
         experiment += self.noisy_circuit
-        final_measurements = experiment.num_measurements
+        m1 = experiment.num_measurements
 
+        # add necessary measurements to verify the preservation of the Bell state
         for observable in observables:
             experiment.append("MPP", list(stim.target_combined_paulis(observable)))
 
-        samples = experiment.compile_sampler().sample(self.max_shots)
-
-        # compare syndrome extracted by the circuit with the initial perfect syndrome
+        # add detectors / observables
+        n_meas = experiment.num_measurements
         g = len(self.stabilizers)
 
-        initial = samples[:, :existent_measurements]
-        extracted = samples[:, [existent_measurements + i for i in self.syndrome_measurements]]
-        wrong = int((extracted != initial[:, :g]).any(axis=1).sum())
-        result["syndrome_error_rate"] = wrong / self.max_shots
-        result["syndrome_error_rate_ci_lower"],result["syndrome_error_rate_ci_upper"] = self._confidence_interval(wrong, self.max_shots)
+        for j in range(g): # D_0..D_(g-1) syndrome (state preservation)
+            experiment.append("DETECTOR", [stim.target_rec(j - n_meas), stim.target_rec(m1 + j - n_meas)])
+        for j, idx in enumerate(self.syndrome_measurements): # D_g..D_(2g-1) syndrome extraction: initial perfect vs noisily extracted stabilizer measurement
+            experiment.append("DETECTOR", [stim.target_rec(j - n_meas), stim.target_rec(m0 + idx - n_meas)])
+        for k in range(len(correlators)): # L_0..L_(2k-1) correlator operations (state preservation)
+            experiment.append("OBSERVABLE_INCLUDE", [stim.target_rec(g + k - n_meas), stim.target_rec(m1 + g + k - n_meas)], k)
 
-        # decode and count logical failures (differences between initial and final perfect measurements)
-        difference = initial ^ samples[:, final_measurements:]
-        syndromes = difference[:, :g]
-        logicals = difference[:, g:]
+        # correct noiseless original circuit: unchanged stabilizers & correlators, extracted syndrome = initial syndrome
+        # --> detector/observable flips <--> changed syndrome bits | wrongly extracted syndrome bits | changed correlator measurement outcomes
+        dem = experiment.detector_error_model(approximate_disjoint_errors=True)
 
-        failures = 0
-        for syndrome, measurements in zip(syndromes, logicals, strict=True):
-            correction = self.decoder.decode(syndrome)
+        error_mechanisms = []  # (probability of mechanism, flip mask of mechanism): bit i = detector D_i, bit 2g + i = observable L_i
+        for inst in dem.flattened():
+            if inst.type == "error":
+                mask = 0
+                for t in inst.targets_copy():
+                    if t.is_relative_detector_id():
+                        mask ^= 1 << t.val
+                    elif t.is_logical_observable_id():
+                        mask ^= 1 << (2 * g + t.val)
+                error_mechanisms.append((inst.args_copy()[0], mask))
+        
+        # truncate: only consider fault sets S with at most max_weight fired error mechanisms
+        #            ! dynamic max_weight: consider next weight until the not enumerated probability mass (tail) is at most ( max_rel_tail * the smallest measured rate ) instead of a constant (better, because *scaling* uncertainty of LER),
+        #                                  or the next weight has more than max_fault_sets fault sets (or none: all fault sets enumerated)
+        # --> probability of that exact fault set: P(S) = prod_{i not in S} (1 - p_i) * prod_{i in S} (p_i) = P(no fault at all, aka no mechanism fires) * prod_{i in S} p_i / (1 - p_i)
+        no_fault = np.prod([1 - p for p, _ in error_mechanisms])
+        outcomes = {} # cache: flip mask of fault set -> (wrongly extracted syndrome, syndrome correction failed because introduced log. operation)
+        total, wrong, failed = 0.0, 0.0, 0.0
 
-            # recovery action -> logical error?
-            corrected = [
-                bool(m) ^ (not correction.commutes(op)) for m, op in zip(measurements, targets, strict=True)
-            ]
-            failures += int(any(corrected))
+        max_weight = -1
+        while max_weight == -1 or (1 - total > self.max_rel_tail * min(failed, wrong) and 0 < comb(len(error_mechanisms), max_weight + 1) <= self.max_fault_sets):
+            max_weight += 1
+            for faults in combinations(range(len(error_mechanisms)), max_weight):
+                prob, mask = no_fault, 0
+                for i in faults:
+                    p, m = error_mechanisms[i]
+                    prob *= p / (1 - p)
+                    mask ^= m
 
-        result["logical_error_rate"] = failures / self.max_shots
-        result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = self._confidence_interval(failures, self.max_shots)
+                if mask not in outcomes:
+                    correction = self.decoder.decode(np.array([(mask >> j) & 1 for j in range(g)], dtype=np.uint8))
+                    outcomes[mask] = (
+                        (mask >> g) % (1 << g) != 0,
+                        any(((mask >> (2 * g + k)) & 1) ^ (not correction.commutes(op)) for k, op in enumerate(targets))
+                    )
+
+                syn, fail = outcomes[mask]
+                total += prob
+                wrong += prob * syn
+                failed += prob * fail
+
+        # not enumerated probability mass (fault sets with > max_weight faults) --> can be wrong / right , failed / successful (unknown) --> worst/best case bounds
+        tail = 1 - total
+
+        result["n_mechanisms"] = len(error_mechanisms)
+        result["max_weight"] = max_weight
+        result["truncation_tail"] = tail
+        result["syndrome_error_rate"] = wrong / total
+        result["syndrome_error_rate_lower"] = wrong
+        result["syndrome_error_rate_upper"] = wrong + tail
+        result["logical_error_rate"] = failed / total
+        result["logical_error_rate_lower"] = failed
+        result["logical_error_rate_upper"] = failed + tail
 
         return result
 
-    def _confidence_interval(self, successes: int, trials: int) -> tuple[float | None, float | None]: # 95% Wilson score CI
-        z = 1.96
-        if trials:
-            center = (successes / trials + z**2 / (2 * trials)) / (1 + z**2 / trials)
-            half = z / (1 + z**2 / trials) * (successes / trials * (1 - successes / trials) / trials + z**2 / (4 * trials**2)) ** 0.5
-            return center - half, center + half
-        return None, None

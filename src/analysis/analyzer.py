@@ -23,7 +23,9 @@ from src.analysis.quality._decoder import BeliefPropOrdStat
 if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
 
-MAX_SHOTS = 10_000
+MAX_REL_TAIL = 0.01
+MAX_FAULT_SETS = 50_000_000
+
 
 @dataclass
 class CircuitAnalysisResult:
@@ -69,11 +71,11 @@ class CircuitAnalyzer:
 
             match circuit.function:
                 case "StatePrep": 
-                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware.noisy_circuit, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, accept_if=circuit.verification, state=circuit.quantum_state) ]
+                    quality_analyzer = [ StatePreparationCircuitAnalyzer(self.hardware.noisy_circuit, circuit.stabilizers, circuit.logical_operators, max_fault_sets=MAX_FAULT_SETS, max_rel_tail=MAX_REL_TAIL, decoder=decoder, accept_if=circuit.verification, state=circuit.quantum_state) ]
                 case "Encoding": 
-                    quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware.noisy_circuit, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, logical_qubits=circuit.logical_qubits) ]
+                    quality_analyzer = [ EncoderCircuitAnalyzer(self.hardware.noisy_circuit, circuit.stabilizers, circuit.logical_operators, max_fault_sets=MAX_FAULT_SETS, max_rel_tail=MAX_REL_TAIL, decoder=decoder, logical_qubits=circuit.logical_qubits) ]
                 case "Syndrome": 
-                    quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware.noisy_circuit, circuit.stabilizers, circuit.logical_operators, max_shots=MAX_SHOTS, decoder=decoder, syndrome_measurements=circuit.syndrome_measurements) ]
+                    quality_analyzer = [ SyndromeExtractionAnalyzer(self.hardware.noisy_circuit, circuit.stabilizers, circuit.logical_operators, max_fault_sets=MAX_FAULT_SETS, max_rel_tail=MAX_REL_TAIL, decoder=decoder, syndrome_measurements=circuit.syndrome_measurements) ]
                 case _:
                     quality_analyzer = []
 

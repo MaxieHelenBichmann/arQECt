@@ -35,6 +35,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from itertools import combinations
+from math import comb
+
 import stim
 import numpy as np
 
@@ -47,7 +50,7 @@ if TYPE_CHECKING:
     from src.models.hardware import HardwareModel
 
 class StatePreparationCircuitAnalyzer(MetricExtractor):
-    def __init__(self, noisy_circuit: stim.Circuit, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString, stim.PauliString]], max_shots: int, decoder: Decoder, accept_if: dict[int, int] | None = None, state: QuantumState | None = None):
+    def __init__(self, noisy_circuit: stim.Circuit, stabilizers: list[stim.PauliString], logical_operators: list[tuple[stim.PauliString, stim.PauliString]], max_fault_sets: int, max_rel_tail: int, decoder: Decoder, accept_if: dict[int, int] | None = None, state: QuantumState | None = None):
         self.noisy_circuit = noisy_circuit
         self.stabilizers = stabilizers
         match state:
@@ -61,7 +64,8 @@ class StatePreparationCircuitAnalyzer(MetricExtractor):
                 self.target_logicals = [-x for (x,_) in logical_operators]
             case _:
                 raise ValueError("A state preparation circuit needs to specify which logical state it prepares.")
-        self.max_shots = max_shots
+        self.max_fault_sets = max_fault_sets
+        self.max_rel_tail = max_rel_tail
         self.accept_if = {} if accept_if is None else accept_if
         self.decoder = decoder
 
@@ -70,49 +74,81 @@ class StatePreparationCircuitAnalyzer(MetricExtractor):
 
         # run experiment with multiple shots
         experiment = self.noisy_circuit.copy()
-        existent_measurements = experiment.num_measurements
+        m0 = experiment.num_measurements
 
+        # add necessary measurements to verify prepared state
         for observable in [*self.stabilizers, *self.target_logicals]:
             experiment.append("MPP", list(stim.target_combined_paulis(observable)))
 
-        samples = experiment.compile_sampler().sample(self.max_shots)
-
-        # discard results that verification does not accept (Protocol B)
-        accepted_mask = np.ones(self.max_shots, dtype=bool)
-
-        for index, expected in self.accept_if.items():
-            accepted_mask &= samples[:, index] == expected
-
-        accepted = samples[accepted_mask]
-        rejected = self.max_shots - len(accepted)
-        result["rejection_rate"] = rejected / self.max_shots
-        result["rejection_rate_ci_lower"], result["rejection_rate_ci_upper"] = self._confidence_interval(rejected, self.max_shots)
-
-        # decode and count logical failures
+        # add detectors / observables
+        n_meas = experiment.num_measurements
         g = len(self.stabilizers)
+        v = len(self.accept_if)
 
-        syndromes = accepted[:, existent_measurements:existent_measurements + g]
-        logicals = accepted[:, existent_measurements + g:]
+        for j in range(g): # D_0..D_(g-1) syndrome
+            experiment.append("DETECTOR", [stim.target_rec(m0 + j - n_meas)])
+        for idx in self.accept_if: # D_g..D_(g+v-1) post-selection
+            experiment.append("DETECTOR", [stim.target_rec(idx - n_meas)])
+        for k in range(len(self.target_logicals)): # L_0..L_k target logical operations
+            experiment.append("OBSERVABLE_INCLUDE", [stim.target_rec(m0 + g + k - n_meas)], k)
 
-        failures = 0
-        for syndrome, measurements in zip(syndromes, logicals, strict=True):
-            correction = self.decoder.decode(syndrome)
 
-            # recovery action -> logical error?
-            corrected = [
-                bool(m) ^ (not correction.commutes(op)) for m, op in zip(measurements, self.target_logicals, strict=True)
-            ]
-            failures += int(any(corrected))
+        # correct noiseless original circuit: trivial syndrome & +1 target logical operations & accepting verification
+        # --> detector/observable flips <--> wrong syndrome bits | wrong logical measurement outcomes | verification rejections
+        dem = experiment.detector_error_model(approximate_disjoint_errors=True)
+    
+        error_mechanisms = []  # (probability of mechanism, flip mask of mechanism): bit i = detector D_i, bit g + v + i = observable L_i
+        for inst in dem.flattened():
+            if inst.type == "error":
+                mask = 0
+                for t in inst.targets_copy():
+                    if t.is_relative_detector_id(): 
+                        mask ^= 1 << t.val
+                    elif t.is_logical_observable_id(): 
+                        mask ^= 1 << (g + v + t.val)
+                error_mechanisms.append((inst.args_copy()[0], mask))
 
-        result["logical_error_rate"] = failures / len(accepted) if len(accepted) else None
-        result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = self._confidence_interval(failures, len(accepted))
+        # truncate: only consider fault sets S with at most max_weight fired error mechanisms 
+        #            ! dynamic max_weight: consider next weight until the not enumerated probability mass (tail) is at most ( max_rel_tail * the smallest measured rate ) instead of a constant (better, because *scaling* uncertainty of LER),
+        #                                  or the next weight has more than max_fault_sets fault sets
+        # --> probability of that exact fault set: P(S) = prod_{i not in S} (1 - p_i) * prod_{i in S} (p_i) = P(no fault at all, aka no mechanism fires) * prod_{i in S} p_i / (1 - p_i)
+        no_fault = np.prod([1 - p for p, _ in error_mechanisms])
+        outcomes = {} # cache: flip mask of fault set -> (physical state accepted by verification, syndrome correction failed because introduced log. operation)
+        total, accepted, failed = 0.0, 0.0, 0.0
 
+        max_weight = -1
+        while max_weight == -1 or (1 - total > self.max_rel_tail * (min(failed, total - accepted) if v else failed) and 0 < comb(len(error_mechanisms), max_weight + 1) <= self.max_fault_sets):
+            max_weight += 1
+            for faults in combinations(range(len(error_mechanisms)), max_weight):
+                prob, mask = no_fault, 0
+                for i in faults:
+                    p, m = error_mechanisms[i]
+                    prob *= p / (1 - p)
+                    mask ^= m
+
+                if mask not in outcomes:
+                    correction = self.decoder.decode(np.array([(mask >> j) & 1 for j in range(g)], dtype=np.uint8))
+                    outcomes[mask] = (
+                        (mask >> g) % (1 << v) == 0,
+                        any(((mask >> (g + v + k)) & 1) ^ (not correction.commutes(op)) for k, op in enumerate(self.target_logicals))
+                    )
+
+                acc, fail = outcomes[mask]
+                total += prob
+                accepted += prob * acc
+                failed += prob * (acc and fail)
+
+        # not enumerated probability mass (fault sets with > max_weight faults) --> can be accepted / rejected , failed / successful (unknown) --> worst/best case bounds
+        tail = 1 - total
+
+        result["n_mechanisms"] = len(error_mechanisms)
+        result["max_weight"] =  max_weight
+        result["truncation_tail"] =  tail
+        result["rejection_rate"] =  (total - accepted) / total
+        result["rejection_rate_lower"] =  total - accepted
+        result["rejection_rate_upper"] =  total - accepted + tail
+        result["logical_error_rate"] =  failed / accepted if accepted else None
+        result["logical_error_rate_lower"] =  failed / (accepted + tail) if accepted + tail else None
+        result["logical_error_rate_upper"] =  (failed + tail) / (accepted + tail) if accepted + tail else None
+    
         return result
-
-    def _confidence_interval(self, successes: int, trials: int) -> tuple[float | None, float | None]: # 95% Wilson score CI
-        z = 1.96
-        if trials:
-            center = (successes / trials + z**2 / (2 * trials)) / (1 + z**2 / trials)
-            half = z / (1 + z**2 / trials) * (successes / trials * (1 - successes / trials) / trials + z**2 / (4 * trials**2)) ** 0.5
-            return center - half, center + half
-        return None, None
