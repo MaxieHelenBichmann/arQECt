@@ -1,6 +1,6 @@
-"""Plot the agreement between the Monte-Carlo-Sampling-based (MC) and the Detector-Error-Model-based (DEM) quality metrics, one directory per circuit function.
+"""Plot the agreement of the Detector-Error-Model-based (DEM) quality metrics with the Monte-Carlo-Sampling-based (MC) ground truth, one directory per circuit function.
 
-Per circuit function and metric: scatter of MC vs DEM per run (circuit on one hardware configuration) with the MC 95% CI and the DEM truncation bounds.
+Per circuit function and metric: scatter of DEM vs MC per run (circuit on one hardware configuration) with the DEM truncation bounds, the MC 95% CI and the speedup of DEM over MC.
 """
 
 import csv
@@ -44,7 +44,7 @@ def visualize(results_dir: Path) -> None:
 
         out_dir = results_dir / "plots" / function.lower()
         out_dir.mkdir(parents=True, exist_ok=True)
-        title = f"{LABELS[function]}: {LABELS[metric]}, Monte Carlo (MC) vs detector error model (DEM)"
+        title = f"{LABELS[function]}: {LABELS[metric]}, detector error model (DEM) vs Monte Carlo (MC)"
         subtitle = (f"{len(rows)} runs (circuits × hardware configurations),  MC: {int(float(rows[0]['max_shots'])):,} shots,  "
                     f"DEM: fault sets with up to {weight.min()}–{weight.max()} faults")
         plot_scatter(s, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric, title, subtitle, out_dir / f"{metric}__scatter.png")
@@ -52,23 +52,23 @@ def visualize(results_dir: Path) -> None:
 
 
 def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric: str, title: str, subtitle: str, file: Path) -> None:
-    """MC vs DEM per run: on the diagonal if both agree, MC 95% CI vertical, DEM bounds horizontal."""
+    """DEM vs MC (ground truth, x) per run: on the diagonal if both agree, DEM bounds vertical, MC 95% CI horizontal."""
     fig, ax = plt.subplots(figsize=(7.6, 6.2), facecolor=SURFACE)
     inside = (dem >= mc_lo - 1e-12) & (dem <= mc_hi + 1e-12) # tolerance: float rounding of the Wilson bounds at rates 0 and 1
     sampled = mc > 0 # without sampled failure, MC only gives an upper bound (drawn at the upper end of its CI)
-    y = np.where(sampled, mc, mc_hi)
+    x = np.where(sampled, mc, mc_hi)
 
     values = np.concatenate([dem_lo, dem_hi, mc_hi, mc[sampled]])
     limits = (values[values > 0].min() / 2, values.max() * 2)
-    ax.plot(limits, limits, color=REFERENCE, linewidth=3, zorder=2, label="exact agreement (MC = DEM)")
+    ax.plot(limits, limits, color=REFERENCE, linewidth=3, zorder=2, label="exact agreement (DEM = MC)")
 
     # intervals in the background (behind the diagonal and the markers)
-    ax.errorbar(dem, y, yerr=np.clip([np.where(sampled, mc - mc_lo, 0), mc_hi - y], 0, None), fmt="none", ecolor=CI_BAR, alpha=0.4, linewidth=1, zorder=1) # clip float rounding
-    ax.errorbar(dem, y, xerr=np.clip([dem - dem_lo, dem_hi - dem], 0, None), fmt="none", ecolor=CI_BAR, alpha=0.4, linewidth=1.5, zorder=1)
+    ax.errorbar(x, dem, xerr=np.clip([np.where(sampled, mc - mc_lo, 0), mc_hi - x], 0, None), fmt="none", ecolor=CI_BAR, alpha=0.4, linewidth=1, zorder=1) # clip float rounding
+    ax.errorbar(x, dem, yerr=np.clip([dem - dem_lo, dem_hi - dem], 0, None), fmt="none", ecolor=CI_BAR, alpha=0.4, linewidth=1.5, zorder=1)
     shade = lambda w: WEIGHTS((np.clip(w, *WEIGHT_RANGE) - WEIGHT_RANGE[0]) / (WEIGHT_RANGE[1] - WEIGHT_RANGE[0]))
-    ax.scatter(dem[inside & sampled], y[inside & sampled], color=shade(weight[inside & sampled]), s=30, alpha=0.8, edgecolors="none", zorder=5)
-    ax.scatter(dem[~inside & sampled], y[~inside & sampled], color=OUTSIDE, s=30, alpha=0.8, edgecolors="none", zorder=5)
-    ax.scatter(dem[~sampled], y[~sampled], facecolors="none", edgecolors=shade(weight[~sampled]), s=30, linewidths=1.2, alpha=0.8, zorder=5)
+    ax.scatter(x[inside & sampled], dem[inside & sampled], color=shade(weight[inside & sampled]), s=30, alpha=0.8, edgecolors="none", zorder=5)
+    ax.scatter(x[~inside & sampled], dem[~inside & sampled], color=OUTSIDE, s=30, alpha=0.8, edgecolors="none", zorder=5)
+    ax.scatter(x[~sampled], dem[~sampled], facecolors="none", edgecolors=shade(weight[~sampled]), s=30, linewidths=1.2, alpha=0.8, zorder=5)
 
     ax.set_xlim(limits)
     ax.set_ylim(limits)
@@ -78,7 +78,7 @@ def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric:
 
     handles = [Line2D([], [], color=REFERENCE, linewidth=3), Line2D([], [], color=CI_BAR, linewidth=1), Line2D([], [], color=CI_BAR, linewidth=1.5),
                Line2D([], [], marker="o", color=OUTSIDE, linestyle="none")]
-    labels = ["exact agreement (MC = DEM)", "MC 95% confidence interval (Wilson, vertical)", "DEM bounds (truncated fault sets, horizontal)",
+    labels = ["exact agreement (DEM = MC)", "MC 95% confidence interval (Wilson, horizontal)", "DEM bounds (truncated fault sets, vertical)",
               "run: DEM outside the MC 95% CI"]
     if not sampled.all(): # MC estimate 0 not drawable on a log axis
         handles.append(Line2D([], [], marker="o", markerfacecolor="none", markeredgecolor=MUTED, linestyle="none"))
@@ -96,9 +96,11 @@ def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric:
     width = (dem_hi - dem_lo)[dem > 0] / dem[dem > 0]
     lines = [f"DEM inside MC 95% CI     {float(s['dem_in_mc_ci']):>8.1%}   (expected ≈ 95%)",
              f"MC CI and DEM overlap     {float(s['intervals_overlap']):>8.1%}",
-             f"median |MC − DEM| / DEM   {float(s['median_rel_deviation']):>8.2%}",
+             f"median |DEM − MC| / MC    {float(s['median_rel_deviation']):>8.2%}",
              f"DEM bounds width / DEM    {np.median(width):>8.2g}   (median),  {np.max(width):.2g} (max)"]
-    style(fig, ax, title, subtitle, f"DEM {LABELS[metric]}", f"MC {LABELS[metric]}", handles, labels, "Agreement: are the runs on the diagonal?", lines)
+    if s["median_speedup"] != "": # older raw results have no times
+        lines.append(f"speedup DEM vs MC         {float(s['median_speedup']):>7.3g}×   (median),  {float(s['min_speedup']):.3g}× – {float(s['max_speedup']):.3g}× (range, MC time / DEM time)")
+    style(fig, ax, title, subtitle, f"MC {LABELS[metric]}", f"DEM {LABELS[metric]}", handles, labels, "Agreement: how close are the circuits to y = x?", lines)
     save(fig, str(file))
 
 

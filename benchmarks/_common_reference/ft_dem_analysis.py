@@ -6,6 +6,8 @@ from src.circuits.circuit import CircuitFunction, QECCircuit
 from collections.abc import Callable
 import stim
 
+import time
+
 from src.analysis.quality.encoder import EncoderCircuitAnalyzer
 from src.analysis.quality.state_prep import StatePreparationCircuitAnalyzer
 from src.analysis.quality.syndrome_extract import SyndromeExtractionAnalyzer
@@ -26,7 +28,11 @@ def run_dem_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, d
         accept_if=circuit_data.verification,
         state=circuit_data.quantum_state,
     )
-    return analyzer.analyze()
+    start = time.perf_counter()
+    result = analyzer.analyze()
+    t = time.perf_counter() - start
+    result["wall_clock_s"] = t
+    return result
     
 
 def run_dem_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_rel_tail: float, max_fault_sets: int) -> dict:
@@ -39,7 +45,11 @@ def run_dem_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, d
             decoder=decoder,
             logical_qubits=circuit_data.logical_qubits
         )
-    return analyzer.analyze()
+    start = time.perf_counter()
+    result = analyzer.analyze()
+    t = time.perf_counter() - start
+    result["wall_clock_s"] = t
+    return result
 
 def run_dem_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_rel_tail: float, max_fault_sets: int) -> dict:
     analyzer = SyndromeExtractionAnalyzer(
@@ -51,7 +61,11 @@ def run_dem_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, d
                 decoder=decoder,
                 syndrome_measurements=circuit_data.syndrome_measurements
             )
-    return analyzer.analyze()   
+    start = time.perf_counter()
+    result = analyzer.analyze()
+    t = time.perf_counter() - start
+    result["wall_clock_s"] = t
+    return result    
 
 
 # -------------------------------------------------------------------------------------------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Validate the quality metrics of QEC circuits extracted via Monte-Carlo-Sampling against a Detector-Error-Model-based analysis."""
+"""Validate the quality metrics of QEC circuits extracted via a Detector-Error-Model-based analysis against Monte-Carlo-Sampling (ground truth)."""
 
 import csv
 import shutil

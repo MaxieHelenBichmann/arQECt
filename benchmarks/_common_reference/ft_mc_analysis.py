@@ -3,6 +3,7 @@ from src.circuits.circuit import CircuitFunction, QECCircuit
 from collections.abc import Callable
 import stim
 import numpy as np
+import time
 
 from src.analysis.quality.encoder import EncoderCircuitAnalyzer
 from src.analysis.quality.state_prep import StatePreparationCircuitAnalyzer
@@ -31,6 +32,8 @@ def run_mc_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, de
             target_logicals = [-z for (_,z) in circuit_data.logical_operators]
         case "-":
             target_logicals = [-x for (x,_) in circuit_data.logical_operators]
+
+    start = time.perf_counter()
 
     # run experiment with multiple shots
     experiment = noisy_circuit.copy()
@@ -70,12 +73,17 @@ def run_mc_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, de
 
     result["logical_error_rate"] = failures / len(accepted) if len(accepted) else None
     result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = _confidence_interval(failures, len(accepted))
+    
+    t = time.perf_counter() - start
+    result["wall_clock_s"] = t
 
     return result
 
 
 def run_mc_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_shots: int) -> dict:
     result : dict[str, object] = {}
+
+    start = time.perf_counter()
     
     # entangle each input qubit with a noiseless reference qubit (Bell pair)
     reference = max(len(circuit_data.stabilizers[0]), noisy_circuit.num_qubits) # first reference qubit index, after all circuit qubits
@@ -119,10 +127,15 @@ def run_mc_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, de
     result["logical_error_rate"] = failures / max_shots
     result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = _confidence_interval(failures, max_shots)
 
+    t = time.perf_counter() - start
+    result["wall_clock_s"] = t
+
     return result
 
 def run_mc_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_shots: int) -> dict:
     result : dict[str, object] = {}
+
+    start = time.perf_counter()
     
     reference = max(len(circuit_data.stabilizers[0]), noisy_circuit.num_qubits) # first reference qubit index, after all circuit qubits
 
@@ -175,6 +188,9 @@ def run_mc_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, de
 
     result["logical_error_rate"] = failures / max_shots
     result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = _confidence_interval(failures, max_shots)
+
+    t = time.perf_counter() - start
+    result["wall_clock_s"] = t
 
     return result
 

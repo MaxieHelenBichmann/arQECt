@@ -1,6 +1,7 @@
-"""Collect analysis results from the Monte-Carlo-Sampling-based approach and the Detector-Error-Model-based approach."""
+"""Collect analysis results (and run times) from the Detector-Error-Model-based approach and the Monte-Carlo-Sampling-based reference."""
 
 import csv
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -99,7 +100,7 @@ def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, hw_con
         **{f"{method}_{metric}": metrics.get(metric) for method, metrics in [("mc", mc_metrics), ("dem", dem_metrics)]
            for metric in ["logical_error_rate", "logical_error_rate_ci_lower", "logical_error_rate_ci_upper", "logical_error_rate_lower", "logical_error_rate_upper",
                           "rejection_rate", "rejection_rate_ci_lower", "rejection_rate_ci_upper", "rejection_rate_lower", "rejection_rate_upper",
-                          "syndrome_error_rate", "syndrome_error_rate_ci_lower", "syndrome_error_rate_ci_upper", "syndrome_error_rate_lower", "syndrome_error_rate_upper", "truncation_tail", "n_mechanisms"]},
+                          "syndrome_error_rate", "syndrome_error_rate_ci_lower", "syndrome_error_rate_ci_upper", "syndrome_error_rate_lower", "syndrome_error_rate_upper", "truncation_tail", "n_mechanisms", "wall_clock_s"]},
     }
 
     file.parent.mkdir(parents=True, exist_ok=True)
