@@ -17,7 +17,7 @@ from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnchoredOffsetbox, PaddedBox, TextArea, VPacker
 
 from benchmarks._common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY, MUTED, GRID, SERIES, REFERENCE, save
-from benchmarks.quality_validity._summarizer import load
+from benchmarks.robustness_validity._summarizer import load
 
 BASELINE, CI_BAR = "#c3c2b7", "#a9a8a0"
 OUTSIDE = "#eb8a1e" # runs with DEM outside the MC CI (red is the target: MC = DEM)

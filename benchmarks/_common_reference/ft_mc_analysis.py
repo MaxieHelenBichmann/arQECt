@@ -5,11 +5,11 @@ import stim
 import numpy as np
 import time
 
-from src.analysis.quality.encoder import EncoderCircuitAnalyzer
-from src.analysis.quality.state_prep import StatePreparationCircuitAnalyzer
-from src.analysis.quality.syndrome_extract import SyndromeExtractionAnalyzer
+from src.analysis.robustness.encoder import EncoderCircuitAnalyzer
+from src.analysis.robustness.state_prep import StatePreparationCircuitAnalyzer
+from src.analysis.robustness.syndrome_extract import SyndromeExtractionAnalyzer
 from src.models.hardware import HardwareModel
-from src.analysis.quality._decoder import Decoder
+from src.analysis.robustness._decoder import Decoder
 
 
 def _confidence_interval(successes: int, trials: int) -> tuple[float | None, float | None]: # 95% Wilson score CI

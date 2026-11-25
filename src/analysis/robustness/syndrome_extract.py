@@ -29,7 +29,7 @@ from itertools import combinations
 from math import comb
 import numpy as np
 
-from src.analysis.quality._decoder import Decoder
+from src.analysis.robustness._decoder import Decoder
 
 from src.analysis import MetricExtractor
 

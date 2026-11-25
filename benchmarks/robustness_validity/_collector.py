@@ -10,7 +10,7 @@ import yaml
 
 from src.circuits.circuit import QECCircuit, CircuitFunction
 from src.models.hardware import HardwareModel
-from src.analysis.quality._decoder import BeliefPropOrdStat
+from src.analysis.robustness._decoder import BeliefPropOrdStat
 
 from benchmarks._common_reference.ft_mc_analysis import _RUN_MONTE_CARLO
 from benchmarks._common_reference.ft_dem_analysis import _RUN_DETECTOR_ERROR_MODEL

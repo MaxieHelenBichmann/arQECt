@@ -13,12 +13,12 @@ from src.analysis.efficiency.dag import DependencyDAGAnalyzer
 from src.analysis.efficiency.wig import InteractionGraphAnalyzer
 from src.analysis.efficiency.qtl import QubitTimelinesAnalyzer
 from src.analysis.efficiency.gd import GateDistributionAnalyzer
-from src.analysis.quality.encoder import EncoderCircuitAnalyzer
-from src.analysis.quality.state_prep import StatePreparationCircuitAnalyzer
-from src.analysis.quality.syndrome_extract import SyndromeExtractionAnalyzer
+from src.analysis.robustness.encoder import EncoderCircuitAnalyzer
+from src.analysis.robustness.state_prep import StatePreparationCircuitAnalyzer
+from src.analysis.robustness.syndrome_extract import SyndromeExtractionAnalyzer
 from dataclasses import dataclass
 from src.circuits.circuit import QECCircuit
-from src.analysis.quality._decoder import BeliefPropOrdStat
+from src.analysis.robustness._decoder import BeliefPropOrdStat
 
 if TYPE_CHECKING:
     from src.models.hardware import HardwareModel

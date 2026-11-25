@@ -10,13 +10,13 @@ import yaml
 
 from src.circuits.circuit import CircuitFunction
 
-from benchmarks.quality_validity._visualizer import visualize
-from benchmarks.quality_validity._collector import collect
-from benchmarks.quality_validity._summarizer import summarize
+from benchmarks.robustness_validity._visualizer import visualize
+from benchmarks.robustness_validity._collector import collect
+from benchmarks.robustness_validity._summarizer import summarize
 
 _CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "configs"
 _CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "circuits"
-_RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "quality_validity"
+_RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "robustness_validity"
 
 
 def run(functions: list[CircuitFunction], max_qubits: int, max_shots: int, max_rel_tail: float, max_fault_sets: int, clean: bool) -> None:

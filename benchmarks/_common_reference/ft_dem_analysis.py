@@ -8,14 +8,14 @@ import stim
 
 import time
 
-from src.analysis.quality.encoder import EncoderCircuitAnalyzer
-from src.analysis.quality.state_prep import StatePreparationCircuitAnalyzer
-from src.analysis.quality.syndrome_extract import SyndromeExtractionAnalyzer
+from src.analysis.robustness.encoder import EncoderCircuitAnalyzer
+from src.analysis.robustness.state_prep import StatePreparationCircuitAnalyzer
+from src.analysis.robustness.syndrome_extract import SyndromeExtractionAnalyzer
 
 import numpy as np
 
 from src.models.hardware import HardwareModel
-from src.analysis.quality._decoder import Decoder
+from src.analysis.robustness._decoder import Decoder
 
 def run_dem_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_rel_tail: float, max_fault_sets: int) -> dict:
     analyzer = StatePreparationCircuitAnalyzer(

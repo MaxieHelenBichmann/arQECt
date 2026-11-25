@@ -41,7 +41,7 @@ from math import comb
 import stim
 import numpy as np
 
-from src.analysis.quality._decoder import Decoder
+from src.analysis.robustness._decoder import Decoder
 
 from src.analysis import MetricExtractor
 from src.circuits.circuit import QuantumState

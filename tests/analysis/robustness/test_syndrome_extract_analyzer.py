@@ -3,8 +3,8 @@ import pathlib
 import pytest
 import stim
 
-from src.analysis.quality._decoder import BeliefPropOrdStat
-from src.analysis.quality.syndrome_extract import SyndromeExtractionAnalyzer
+from src.analysis.robustness._decoder import BeliefPropOrdStat
+from src.analysis.robustness.syndrome_extract import SyndromeExtractionAnalyzer
 from src.models.common import GateKind
 from src.models.hardware import SuperconductingQubitsModel
 
