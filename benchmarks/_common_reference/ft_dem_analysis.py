@@ -11,7 +11,7 @@ import numpy as np
 from src.models.hardware import HardwareModel
 from src.analysis.quality._decoder import Decoder
 
-def run_dem_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_tail: float, max_fault_sets: int) -> dict:
+def run_dem_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_rel_tail: float, max_fault_sets: int) -> dict:
     noisy_circ = noisy_circuit.copy()
     m0 = noisy_circ.num_measurements
 
@@ -57,14 +57,15 @@ def run_dem_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, d
             error_mechanisms.append((inst.args_copy()[0], mask))
 
     # truncate: only consider fault sets S with at most max_weight fired error mechanisms 
-    #            ! dynamic max_weight: consider next weight until the not enumerated probability mass (tail) below max_tail or the next weight has more than max_fault_sets fault sets
+    #            ! dynamic max_weight: consider next weight until the not enumerated probability mass (tail) is at most ( max_rel_tail * the smallest measured rate ) instead of a constant (better, because *scaling* uncertainty of LER),
+    #                                  or the next weight has more than max_fault_sets fault sets
     # --> probability of that exact fault set: P(S) = prod_{i not in S} (1 - p_i) * prod_{i in S} (p_i) = P(no fault at all, aka no mechanism fires) * prod_{i in S} p_i / (1 - p_i)
     no_fault = np.prod([1 - p for p, _ in error_mechanisms])
     outcomes = {} # cache: flip mask of fault set -> (physical state accepted by verification, syndrome correction failed because introduced log. operation)
     total, accepted, failed = 0.0, 0.0, 0.0
 
     max_weight = -1
-    while max_weight == -1 or (1 - total >= max_tail and comb(len(error_mechanisms), max_weight + 1) <= max_fault_sets):
+    while max_weight == -1 or (1 - total > max_rel_tail * (min(failed, total - accepted) if v else failed) and 0 < comb(len(error_mechanisms), max_weight + 1) <= max_fault_sets):
         max_weight += 1
         for faults in combinations(range(len(error_mechanisms)), max_weight):
             prob, mask = no_fault, 0
@@ -100,7 +101,7 @@ def run_dem_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, d
         "logical_error_rate_upper": (failed + tail) / (accepted + tail),
     }
 
-def run_dem_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_tail: float, max_fault_sets: int) -> dict:
+def run_dem_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_rel_tail: float, max_fault_sets: int) -> dict:
     reference = max(len(circuit_data.stabilizers[0]), noisy_circuit.num_qubits)
 
     experiment = stim.Circuit()
@@ -146,14 +147,15 @@ def run_dem_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, d
             error_mechanisms.append((inst.args_copy()[0], mask))
 
     # truncate: only consider fault sets S with at most max_weight fired error mechanisms
-    #            ! dynamic max_weight: consider next weight until the not enumerated probability mass (tail) below max_tail or the next weight has more than max_fault_sets fault sets
+    #            ! dynamic max_weight: consider next weight until the not enumerated probability mass (tail) is at most ( max_rel_tail * measured error rate ) instead of a constant (better, because *scaling* uncertainty of LER),
+    #                                  or the next weight has more than max_fault_sets fault sets
     # --> probability of that exact fault set: P(S) = prod_{i not in S} (1 - p_i) * prod_{i in S} (p_i) = P(no fault at all, aka no mechanism fires) * prod_{i in S} p_i / (1 - p_i)
     no_fault = np.prod([1 - p for p, _ in error_mechanisms])
     outcomes = {} # cache: flip mask of fault set -> syndrome correction failed because introduced log. operation
     total, failed = 0.0, 0.0
 
     max_weight = -1
-    while max_weight == -1 or (1 - total >= max_tail and comb(len(error_mechanisms), max_weight + 1) <= max_fault_sets):
+    while max_weight == -1 or (1 - total > max_rel_tail * failed and 0 < comb(len(error_mechanisms), max_weight + 1) <= max_fault_sets):
         max_weight += 1
         for faults in combinations(range(len(error_mechanisms)), max_weight):
             prob, mask = no_fault, 0
@@ -182,7 +184,7 @@ def run_dem_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, d
         "logical_error_rate_upper": failed + tail,
     }
 
-def run_dem_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_tail: float, max_fault_sets: int) -> dict:
+def run_dem_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_rel_tail: float, max_fault_sets: int) -> dict:
     reference = max(len(circuit_data.stabilizers[0]), noisy_circuit.num_qubits)
     
     targets = []
@@ -232,14 +234,15 @@ def run_dem_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, d
             error_mechanisms.append((inst.args_copy()[0], mask))
     
     # truncate: only consider fault sets S with at most max_weight fired error mechanisms
-    #            ! dynamic max_weight: consider next weight until the not enumerated probability mass (tail) below max_tail or the next weight has more than max_fault_sets fault sets
+    #            ! dynamic max_weight: consider next weight until the not enumerated probability mass (tail) is at most ( max_rel_tail * the smallest measured rate ) instead of a constant (better, because *scaling* uncertainty of LER),
+    #                                  or the next weight has more than max_fault_sets fault sets (or none: all fault sets enumerated)
     # --> probability of that exact fault set: P(S) = prod_{i not in S} (1 - p_i) * prod_{i in S} (p_i) = P(no fault at all, aka no mechanism fires) * prod_{i in S} p_i / (1 - p_i)
     no_fault = np.prod([1 - p for p, _ in error_mechanisms])
     outcomes = {} # cache: flip mask of fault set -> (wrongly extracted syndrome, syndrome correction failed because introduced log. operation)
     total, wrong, failed = 0.0, 0.0, 0.0
 
     max_weight = -1
-    while max_weight == -1 or (1 - total >= max_tail and comb(len(error_mechanisms), max_weight + 1) <= max_fault_sets):
+    while max_weight == -1 or (1 - total > max_rel_tail * min(failed, wrong) and 0 < comb(len(error_mechanisms), max_weight + 1) <= max_fault_sets):
         max_weight += 1
         for faults in combinations(range(len(error_mechanisms)), max_weight):
             prob, mask = no_fault, 0
