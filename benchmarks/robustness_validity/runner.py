@@ -44,7 +44,7 @@ if __name__ == "__main__":
     parser.add_argument("--function", nargs="+", choices=["StatePrep", "Encoding", "Syndrome"], default=["StatePrep", "Encoding", "Syndrome"],
                         help="only run analyses of these functions (default: all)")
     parser.add_argument("--max-qubits", type=int, default=sys.maxsize, help="skip circuits with more qubits (default: no limit)")
-    parser.add_argument("--max-shots", type=int, default=100_000_000, help="maximum number of shots used for sampling")
+    parser.add_argument("--max-shots", type=int, default=500_000_000, help="maximum number of shots used for sampling")
     parser.add_argument("--batch-size", type=int, default=100_000, help="sample in batches of this many shots until the stopping criterion (--max-rel-ci) or --max-shots is reached")
     parser.add_argument("--max-rel-ci", type=float, default=0.1, help="stop sampling once the half-width of the 95%% CI of the logical error rate is at most this fraction of the estimate")
     parser.add_argument("--max-rel-tail", type=float, default=0.01, help="enumerate fault sets (DEM) of increasing weight until the not enumerated probability mass is at most this fraction of the smallest measured rate")

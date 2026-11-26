@@ -115,7 +115,7 @@ def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, ft, met
              f"median |DEM − MC| / MC    {float(s['median_rel_deviation']):>8.2%}",
              f"DEM bounds width / DEM    {np.median(width):>8.2g}   (median),  {np.max(width):.2g} (max)"]
     if s["median_speedup"] != "": # older raw results have no times
-        lines.append(f"speedup DEM vs MC         {float(s['median_speedup']):>7.3g}×   (median),  {float(s['min_speedup']):.3g}× – {float(s['max_speedup']):.3g}× (range, MC time / DEM time)")
+        lines.append(f"speedup DEM vs MC         {float(s['median_speedup']):>7,.1f}×   (median),  {float(s['min_speedup']):,.1f}× – {float(s['max_speedup']):,.1f}× (range, MC time / DEM time)")
     style(fig, ax, title, subtitle, f"MC {LABELS[metric]} (+ 95% confidence interval)", f"DEM {LABELS[metric]} (+ bounds due to truncated fault sets)", handles, labels, "Agreement: how close are the circuits to y = x?", lines)
     fig.savefig(file, dpi=400, facecolor=SURFACE, bbox_inches="tight", pad_inches=0.25) # higher dpi than the shared save()
     plt.close(fig)
