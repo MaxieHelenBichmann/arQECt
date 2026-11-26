@@ -19,7 +19,7 @@ _CIRCUIT_DIR = Path(__file__).resolve().parents[2] / "data" / "circuits"
 _RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "robustness_validity"
 
 
-def run(functions: list[CircuitFunction], max_qubits: int, max_shots: int, max_rel_tail: float, max_fault_sets: int, clean: bool) -> None:
+def run(functions: list[CircuitFunction], max_qubits: int, max_shots: int, batch_size: int, max_rel_ci: float, max_rel_tail: float, max_fault_sets: int, clean: bool) -> None:
 
     if clean:
         for path in [*(_RESULTS_DIR / "raw" / function.lower() for function in functions), *([_RESULTS_DIR / "raw" / "encodingcleaninput"] if "Encoding" in functions else []),
@@ -32,7 +32,7 @@ def run(functions: list[CircuitFunction], max_qubits: int, max_shots: int, max_r
                 continue
             print(f"Deleted {path}...")
 
-    collect(functions, _CIRCUIT_DIR, _CONFIG_DIR, _RESULTS_DIR, max_qubits, max_shots, max_rel_tail, max_fault_sets)
+    collect(functions, _CIRCUIT_DIR, _CONFIG_DIR, _RESULTS_DIR, max_qubits, max_shots, batch_size, max_rel_ci, max_rel_tail, max_fault_sets)
     summarize(_RESULTS_DIR)
     visualize(_RESULTS_DIR)
 
@@ -44,11 +44,13 @@ if __name__ == "__main__":
     parser.add_argument("--function", nargs="+", choices=["StatePrep", "Encoding", "Syndrome"], default=["StatePrep", "Encoding", "Syndrome"],
                         help="only run analyses of these functions (default: all)")
     parser.add_argument("--max-qubits", type=int, default=sys.maxsize, help="skip circuits with more qubits (default: no limit)")
-    parser.add_argument("--max-shots", type=int, default=1_000_000, help="number of shots used for sampling")
+    parser.add_argument("--max-shots", type=int, default=100_000_000, help="maximum number of shots used for sampling")
+    parser.add_argument("--batch-size", type=int, default=100_000, help="sample in batches of this many shots until the stopping criterion (--max-rel-ci) or --max-shots is reached")
+    parser.add_argument("--max-rel-ci", type=float, default=0.1, help="stop sampling once the half-width of the 95%% CI of the logical error rate is at most this fraction of the estimate")
     parser.add_argument("--max-rel-tail", type=float, default=0.01, help="enumerate fault sets (DEM) of increasing weight until the not enumerated probability mass is at most this fraction of the smallest measured rate")
     parser.add_argument("--max-fault-sets", type=int, default=50_000_000, help="stop increasing the weight (DEM) if the next weight has more fault sets than this")
     parser.add_argument("--clean", action="store_true",
                             help="delete all results (raw, intermediate csvs, plots) before running")
     args = parser.parse_args()
 
-    run(functions=args.function, max_qubits=args.max_qubits, max_shots=args.max_shots, max_rel_tail=args.max_rel_tail, max_fault_sets=args.max_fault_sets, clean=args.clean)
+    run(functions=args.function, max_qubits=args.max_qubits, max_shots=args.max_shots, batch_size=args.batch_size, max_rel_ci=args.max_rel_ci, max_rel_tail=args.max_rel_tail, max_fault_sets=args.max_fault_sets, clean=args.clean)

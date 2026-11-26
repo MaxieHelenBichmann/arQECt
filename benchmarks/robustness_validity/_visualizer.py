@@ -45,11 +45,12 @@ def visualize(results_dir: Path) -> None:
         dem, dem_lo, dem_hi = column(f"dem_{metric}"), column(f"dem_{metric}_lower"), column(f"dem_{metric}_upper")
         weight = column("max_weight").astype(int)
         ft = np.array([r["ft"] == "True" for r in rows])
+        shots = column("mc_shots")
 
         out_dir = results_dir / "plots" / function.lower()
         out_dir.mkdir(parents=True, exist_ok=True)
         title = f"{LABELS[function]}: {LABELS[metric]}, detector error model (DEM) vs Monte Carlo (MC)"
-        subtitle = (f"{len(rows)} runs (circuits × hardware configurations),  MC: {int(float(rows[0]['max_shots'])):,} shots,  "
+        subtitle = (f"{len(rows)} runs (circuits × hardware configurations),  MC: {shots.min():,.0f}–{shots.max():,.0f} shots,  "
                     f"DEM: fault sets with up to {weight.min()}–{weight.max()} faults")
         plot_scatter(s, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, ft, metric, title, subtitle, out_dir / f"{metric}__scatter.png")
     print(f"Saved plots to {results_dir / 'plots'}")

@@ -20,7 +20,7 @@ def _confidence_interval(successes: int, trials: int) -> tuple[float | None, flo
         return center - half, center + half
     return None, None
 
-def run_mc_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_shots: int) -> dict:
+def run_mc_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_shots: int, batch_size: int, max_rel_ci: float) -> dict:
     result : dict[str, object] = {}
 
     match circuit_data.quantum_state:
@@ -42,37 +42,50 @@ def run_mc_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, de
     for observable in [*circuit_data.stabilizers, *target_logicals]:
         experiment.append("MPP", list(stim.target_combined_paulis(observable)))
 
-    samples = experiment.compile_sampler().sample(max_shots)
-
-    # discard results that verification does not accept (Protocol B)
-    accepted_mask = np.ones(max_shots, dtype=bool)
-
-    for index, expected in circuit_data.verification.items():
-        accepted_mask &= samples[:, index] == expected
-
-    accepted = samples[accepted_mask]
-    rejected = max_shots - len(accepted)
-    result["rejection_rate"] = rejected / max_shots
-    result["rejection_rate_ci_lower"], result["rejection_rate_ci_upper"] = _confidence_interval(rejected, max_shots)
-
-    # decode and count logical failures
+    sampler = experiment.compile_sampler()
     g = len(circuit_data.stabilizers)
 
-    syndromes = accepted[:, existent_measurements:existent_measurements + g]
-    logicals = accepted[:, existent_measurements + g:]
+    # sample in batches until the CI of the logical error rate (on accepted shots) is narrow enough relative to the estimate, or max_shots is reached
+    shots, num_accepted, failures = 0, 0, 0
+    while shots < max_shots:
+        batch = min(batch_size, max_shots - shots)
+        samples = sampler.sample(batch)
+        shots += batch
 
-    failures = 0
-    for syndrome, measurements in zip(syndromes, logicals, strict=True):
-        correction = decoder.decode(syndrome)
+        # discard results that verification does not accept (Protocol B)
+        accepted_mask = np.ones(batch, dtype=bool)
 
-        # recovery action -> logical error?
-        corrected = [
-            bool(m) ^ (not correction.commutes(op)) for m, op in zip(measurements, target_logicals, strict=True)
-        ]
-        failures += int(any(corrected))
+        for index, expected in circuit_data.verification.items():
+            accepted_mask &= samples[:, index] == expected
 
-    result["logical_error_rate"] = failures / len(accepted) if len(accepted) else None
-    result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = _confidence_interval(failures, len(accepted))
+        accepted = samples[accepted_mask]
+        num_accepted += len(accepted)
+
+        # decode and count logical failures
+        syndromes = accepted[:, existent_measurements:existent_measurements + g]
+        logicals = accepted[:, existent_measurements + g:]
+
+        for syndrome, measurements in zip(syndromes, logicals, strict=True):
+            correction = decoder.decode(syndrome)
+
+            # recovery action -> logical error?
+            corrected = [
+                bool(m) ^ (not correction.commutes(op)) for m, op in zip(measurements, target_logicals, strict=True)
+            ]
+            failures += int(any(corrected))
+
+        lower, upper = _confidence_interval(failures, num_accepted)
+        if failures and (upper - lower) / 2 <= max_rel_ci * failures / num_accepted:
+            break
+
+    result["shots"] = shots
+
+    rejected = shots - num_accepted
+    result["rejection_rate"] = rejected / shots
+    result["rejection_rate_ci_lower"], result["rejection_rate_ci_upper"] = _confidence_interval(rejected, shots)
+
+    result["logical_error_rate"] = failures / num_accepted if num_accepted else None
+    result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = _confidence_interval(failures, num_accepted)
     
     t = time.perf_counter() - start
     result["wall_clock_s"] = t
@@ -80,7 +93,7 @@ def run_mc_analysis_sp(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, de
     return result
 
 
-def run_mc_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_shots: int) -> dict:
+def run_mc_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_shots: int, batch_size: int, max_rel_ci: float) -> dict:
     result : dict[str, object] = {}
 
     start = time.perf_counter()
@@ -106,33 +119,43 @@ def run_mc_analysis_en(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, de
     for observable in [*circuit_data.stabilizers, *correlators]:
         experiment.append("MPP", list(stim.target_combined_paulis(observable)))
 
-    samples = experiment.compile_sampler().sample(max_shots)
-
-    # decode and count logical failures
+    sampler = experiment.compile_sampler()
     g = len(circuit_data.stabilizers)
 
-    syndromes = samples[:, existent_measurements:existent_measurements + g]
-    logicals = samples[:, existent_measurements + g:]
+    # sample in batches until the CI of the logical error rate is narrow enough relative to the estimate, or max_shots is reached
+    shots, failures = 0, 0
+    while shots < max_shots:
+        batch = min(batch_size, max_shots - shots)
+        samples = sampler.sample(batch)
+        shots += batch
 
-    failures = 0
-    for syndrome, measurements in zip(syndromes, logicals, strict=True):
-        correction = decoder.decode(syndrome)
+        # decode and count logical failures
+        syndromes = samples[:, existent_measurements:existent_measurements + g]
+        logicals = samples[:, existent_measurements + g:]
 
-        # recovery action -> logical error?
-        corrected = [
-            bool(m) ^ (not correction.commutes(op)) for m, op in zip(measurements, targets, strict=True)
-        ]
-        failures += int(any(corrected))
+        for syndrome, measurements in zip(syndromes, logicals, strict=True):
+            correction = decoder.decode(syndrome)
 
-    result["logical_error_rate"] = failures / max_shots
-    result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = _confidence_interval(failures, max_shots)
+            # recovery action -> logical error?
+            corrected = [
+                bool(m) ^ (not correction.commutes(op)) for m, op in zip(measurements, targets, strict=True)
+            ]
+            failures += int(any(corrected))
+
+        lower, upper = _confidence_interval(failures, shots)
+        if failures and (upper - lower) / 2 <= max_rel_ci * failures / shots:
+            break
+
+    result["shots"] = shots
+    result["logical_error_rate"] = failures / shots
+    result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = _confidence_interval(failures, shots)
 
     t = time.perf_counter() - start
     result["wall_clock_s"] = t
 
     return result
 
-def run_mc_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_shots: int) -> dict:
+def run_mc_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, decoder: Decoder, max_shots: int, batch_size: int, max_rel_ci: float) -> dict:
     result : dict[str, object] = {}
 
     start = time.perf_counter()
@@ -160,34 +183,45 @@ def run_mc_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, de
     for observable in observables:
         experiment.append("MPP", list(stim.target_combined_paulis(observable)))
 
-    samples = experiment.compile_sampler().sample(max_shots)
-
-    # compare syndrome extracted by the circuit with the initial perfect syndrome
+    sampler = experiment.compile_sampler()
     g = len(circuit_data.stabilizers)
 
-    initial = samples[:, :existent_measurements]
-    extracted = samples[:, [existent_measurements + i for i in circuit_data.syndrome_measurements]]
-    wrong = int((extracted != initial[:, :g]).any(axis=1).sum())
-    result["syndrome_error_rate"] = wrong / max_shots
-    result["syndrome_error_rate_ci_lower"],result["syndrome_error_rate_ci_upper"] = _confidence_interval(wrong, max_shots)
+    # sample in batches until the CI of the logical error rate is narrow enough relative to the estimate, or max_shots is reached
+    shots, wrong, failures = 0, 0, 0
+    while shots < max_shots:
+        batch = min(batch_size, max_shots - shots)
+        samples = sampler.sample(batch)
+        shots += batch
 
-    # decode and count logical failures (differences between initial and final perfect measurements)
-    difference = initial ^ samples[:, final_measurements:]
-    syndromes = difference[:, :g]
-    logicals = difference[:, g:]
+        # compare syndrome extracted by the circuit with the initial perfect syndrome
+        initial = samples[:, :existent_measurements]
+        extracted = samples[:, [existent_measurements + i for i in circuit_data.syndrome_measurements]]
+        wrong += int((extracted != initial[:, :g]).any(axis=1).sum())
 
-    failures = 0
-    for syndrome, measurements in zip(syndromes, logicals, strict=True):
-        correction = decoder.decode(syndrome)
+        # decode and count logical failures (differences between initial and final perfect measurements)
+        difference = initial ^ samples[:, final_measurements:]
+        syndromes = difference[:, :g]
+        logicals = difference[:, g:]
 
-        # recovery action -> logical error?
-        corrected = [
-            bool(m) ^ (not correction.commutes(op)) for m, op in zip(measurements, targets, strict=True)
-        ]
-        failures += int(any(corrected))
+        for syndrome, measurements in zip(syndromes, logicals, strict=True):
+            correction = decoder.decode(syndrome)
 
-    result["logical_error_rate"] = failures / max_shots
-    result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = _confidence_interval(failures, max_shots)
+            # recovery action -> logical error?
+            corrected = [
+                bool(m) ^ (not correction.commutes(op)) for m, op in zip(measurements, targets, strict=True)
+            ]
+            failures += int(any(corrected))
+
+        lower, upper = _confidence_interval(failures, shots)
+        if failures and (upper - lower) / 2 <= max_rel_ci * failures / shots:
+            break
+
+    result["shots"] = shots
+    result["syndrome_error_rate"] = wrong / shots
+    result["syndrome_error_rate_ci_lower"],result["syndrome_error_rate_ci_upper"] = _confidence_interval(wrong, shots)
+
+    result["logical_error_rate"] = failures / shots
+    result["logical_error_rate_ci_lower"], result["logical_error_rate_ci_upper"] = _confidence_interval(failures, shots)
 
     t = time.perf_counter() - start
     result["wall_clock_s"] = t
@@ -198,7 +232,7 @@ def run_mc_analysis_se(circuit_data: QECCircuit, noisy_circuit: stim.Circuit, de
 # -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-_RUN_MONTE_CARLO : dict[CircuitFunction, Callable[[QECCircuit, stim.Circuit, Decoder, int], dict]] = {
+_RUN_MONTE_CARLO : dict[CircuitFunction, Callable[[QECCircuit, stim.Circuit, Decoder, int, int, float], dict]] = {
     "StatePrep": run_mc_analysis_sp,
     "Encoding": run_mc_analysis_en,
     "Syndrome": run_mc_analysis_se
