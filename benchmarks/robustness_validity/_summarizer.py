@@ -13,6 +13,7 @@ import numpy as np
 METRICS = {
     "StatePrep": ["logical_error_rate", "rejection_rate"],
     "Encoding": ["logical_error_rate"],
+    "EncodingCleanInput": ["logical_error_rate"],
     "Syndrome": ["logical_error_rate", "syndrome_error_rate"],
 }
 

@@ -64,16 +64,38 @@ def collect(functions: list[CircuitFunction], circuit_dir: Path, config_dir: Pat
 
                 decoder = BeliefPropOrdStat(abstract_hardware, qec_circuit.stabilizers)
 
-                print(f"[{function}] Running monte carlo analysis of noisy {circuit_name} on {config["name"]}...")
-                mc_metrics = _RUN_MONTE_CARLO[function](circuit_data=qec_circuit, noisy_circuit=noisy_circuit, decoder=decoder, max_shots=max_shots)
+                # encoders: analyze the real noisy circuit (noisy input) and a version without noise on the input qubits before their first gate (clean input)
+                variants = {function: noisy_circuit}
+                if function == "Encoding":
+                    clean_input_circuit = stim.Circuit()
+                    started = set()
+                    for op in noisy_circuit.flattened():
+                        gate = stim.gate_data(op.name)
+                        if gate.is_noisy_gate and not gate.produces_measurements:
+                            targets = op.targets_copy()
+                            step = 2 if gate.is_two_qubit_gate else 1
+                            kept = []
+                            for i in range(0, len(targets), step):
+                                if not any(t.value in qec_circuit.logical_qubits and t.value not in started for t in targets[i:i + step]):
+                                    kept += targets[i:i + step]
+                            if kept:
+                                clean_input_circuit.append(op.name, kept, op.gate_args_copy(), tag=op.tag)
+                        else:
+                            clean_input_circuit.append(op)
+                            started |= {t.value for t in op.targets_copy() if t.is_qubit_target}
+                    variants["EncodingCleanInput"] = clean_input_circuit
 
-                print(f"[{function}] Running detector error model analysis of noisy {circuit_name} on {config["name"]}...")
-                dem_metrics = _RUN_DETECTOR_ERROR_MODEL[function](circuit_data=qec_circuit, noisy_circuit=noisy_circuit, decoder=decoder, max_rel_tail=max_rel_tail, max_fault_sets=max_fault_sets)
+                for variant, variant_circuit in variants.items():
+                    print(f"[{variant}] Running monte carlo analysis of noisy {circuit_name} on {config["name"]}...")
+                    mc_metrics = _RUN_MONTE_CARLO[function](circuit_data=qec_circuit, noisy_circuit=variant_circuit, decoder=decoder, max_shots=max_shots)
 
-                save_raw_results(raw_file, circuit_file, qec_circuit, config, max_shots, max_rel_tail, max_fault_sets, mc_metrics, dem_metrics)
+                    print(f"[{variant}] Running detector error model analysis of noisy {circuit_name} on {config["name"]}...")
+                    dem_metrics = _RUN_DETECTOR_ERROR_MODEL[function](circuit_data=qec_circuit, noisy_circuit=variant_circuit, decoder=decoder, max_rel_tail=max_rel_tail, max_fault_sets=max_fault_sets)
+
+                    save_raw_results(results_dir / "raw" / variant.lower() / f"{config['name']}__{circuit_name}.csv", circuit_file, qec_circuit, variant, config, max_shots, max_rel_tail, max_fault_sets, mc_metrics, dem_metrics)
 
 
-def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, hw_config: dict,
+def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, function: str, hw_config: dict,
                      max_shots: int, max_rel_tail: float, max_fault_sets: int, mc_metrics: dict, dem_metrics: dict) -> None:
     if not circuit.verification: # nothing to reject: rejection rate trivially 0 for both methods, not saved
         mc_metrics = {k: v for k, v in mc_metrics.items() if not k.startswith("rejection_rate")}
@@ -83,8 +105,9 @@ def save_raw_results(file: Path, circuit_file: Path, circuit: QECCircuit, hw_con
         # circuit
         "circuit": circuit_file.stem,
         "code": circuit_file.parent.parent.name,
-        "function": circuit.function,
+        "function": function, # circuit function, or "EncodingCleanInput" for encoders without noise on the input before their first gate
         "state": circuit.quantum_state,
+        "ft": "_ft_preparation" in circuit_file.parent.name and "non_ft" not in circuit_file.parent.name, # fault-tolerant state preparation (task folder)
         "num_qubits": circuit.circuit.num_qubits,
         "num_logical_qubits": len(circuit.logical_operators),
         "num_stabilizers": len(circuit.stabilizers),

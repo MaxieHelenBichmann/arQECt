@@ -22,7 +22,8 @@ _RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "robustness_val
 def run(functions: list[CircuitFunction], max_qubits: int, max_shots: int, max_rel_tail: float, max_fault_sets: int, clean: bool) -> None:
 
     if clean:
-        for path in [*(_RESULTS_DIR / "raw" / function.lower() for function in functions), _RESULTS_DIR / "plots", _RESULTS_DIR / "summary.csv"]:
+        for path in [*(_RESULTS_DIR / "raw" / function.lower() for function in functions), *([_RESULTS_DIR / "raw" / "encodingcleaninput"] if "Encoding" in functions else []),
+                     _RESULTS_DIR / "plots", _RESULTS_DIR / "summary.csv"]:
             if path.is_dir():
                 shutil.rmtree(path)
             elif path.exists():

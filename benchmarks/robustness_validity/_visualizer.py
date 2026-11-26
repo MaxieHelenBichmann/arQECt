@@ -16,15 +16,18 @@ from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, ListedColor
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnchoredOffsetbox, PaddedBox, TextArea, VPacker
 
-from benchmarks._common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY, MUTED, GRID, SERIES, REFERENCE, save
+from benchmarks._common_reference.plotting import SURFACE, TEXT, TEXT_SECONDARY, MUTED, GRID, SERIES, REFERENCE
 from benchmarks.robustness_validity._summarizer import load
 
-BASELINE, CI_BAR = "#c3c2b7", "#a9a8a0"
+BASELINE, CI_BAR = "#c3c2b7", "#8fb6e3"
 OUTSIDE = "#eb8a1e" # runs with DEM outside the MC CI (red is the target: MC = DEM)
+OUTSIDE_BAR = "#f2b56f"
 WEIGHTS = LinearSegmentedColormap.from_list("weights", ["#b5d3f5", SERIES, "#0d366b"]) # lightness: truncation weight the DEM needed (light: few faults)
+FT_WEIGHTS = LinearSegmentedColormap.from_list("ft_weights", ["#b9e4c9", "#2e9e5b", "#0f4d2a"]) # same, for fault-tolerant circuits
+FT_BAR = "#8cc29f"
 WEIGHT_RANGE = (1, 6) # same color for the same weight in every plot
 LABELS = {
-    "StatePrep": "State preparation", "Encoding": "Encoding", "Syndrome": "Syndrome extraction",
+    "StatePrep": "State preparation", "Encoding": "Encoding (noisy input)", "EncodingCleanInput": "Encoding (clean input)", "Syndrome": "Syndrome extraction",
     "logical_error_rate": "logical error rate", "rejection_rate": "rejection rate", "syndrome_error_rate": "syndrome error rate",
 }
 
@@ -41,18 +44,19 @@ def visualize(results_dir: Path) -> None:
         mc, mc_lo, mc_hi = column(f"mc_{metric}"), column(f"mc_{metric}_ci_lower"), column(f"mc_{metric}_ci_upper")
         dem, dem_lo, dem_hi = column(f"dem_{metric}"), column(f"dem_{metric}_lower"), column(f"dem_{metric}_upper")
         weight = column("max_weight").astype(int)
+        ft = np.array([r["ft"] == "True" for r in rows])
 
         out_dir = results_dir / "plots" / function.lower()
         out_dir.mkdir(parents=True, exist_ok=True)
         title = f"{LABELS[function]}: {LABELS[metric]}, detector error model (DEM) vs Monte Carlo (MC)"
         subtitle = (f"{len(rows)} runs (circuits × hardware configurations),  MC: {int(float(rows[0]['max_shots'])):,} shots,  "
                     f"DEM: fault sets with up to {weight.min()}–{weight.max()} faults")
-        plot_scatter(s, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric, title, subtitle, out_dir / f"{metric}__scatter.png")
+        plot_scatter(s, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, ft, metric, title, subtitle, out_dir / f"{metric}__scatter.png")
     print(f"Saved plots to {results_dir / 'plots'}")
 
 
-def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric: str, title: str, subtitle: str, file: Path) -> None:
-    """DEM vs MC (ground truth, x) per run: on the diagonal if both agree, DEM bounds vertical, MC 95% CI horizontal."""
+def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, ft, metric: str, title: str, subtitle: str, file: Path) -> None:
+    """DEM vs MC (ground truth, x) per run: on the diagonal if both agree, DEM bounds vertical, MC 95% CI horizontal. Fault-tolerant circuits green, others blue."""
     fig, ax = plt.subplots(figsize=(7.6, 6.2), facecolor=SURFACE)
     inside = (dem >= mc_lo - 1e-12) & (dem <= mc_hi + 1e-12) # tolerance: float rounding of the Wilson bounds at rates 0 and 1
     sampled = mc > 0 # without sampled failure, MC only gives an upper bound (drawn at the upper end of its CI)
@@ -63,12 +67,18 @@ def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric:
     ax.plot(limits, limits, color=REFERENCE, linewidth=3, zorder=2, label="exact agreement (DEM = MC)")
 
     # intervals in the background (behind the diagonal and the markers)
-    ax.errorbar(x, dem, xerr=np.clip([np.where(sampled, mc - mc_lo, 0), mc_hi - x], 0, None), fmt="none", ecolor=CI_BAR, alpha=0.4, linewidth=1, zorder=1) # clip float rounding
-    ax.errorbar(x, dem, yerr=np.clip([dem - dem_lo, dem_hi - dem], 0, None), fmt="none", ecolor=CI_BAR, alpha=0.4, linewidth=1.5, zorder=1)
-    shade = lambda w: WEIGHTS((np.clip(w, *WEIGHT_RANGE) - WEIGHT_RANGE[0]) / (WEIGHT_RANGE[1] - WEIGHT_RANGE[0]))
-    ax.scatter(x[inside & sampled], dem[inside & sampled], color=shade(weight[inside & sampled]), s=30, alpha=0.8, edgecolors="none", zorder=5)
-    ax.scatter(x[~inside & sampled], dem[~inside & sampled], color=OUTSIDE, s=30, alpha=0.8, edgecolors="none", zorder=5)
-    ax.scatter(x[~sampled], dem[~sampled], facecolors="none", edgecolors=shade(weight[~sampled]), s=30, linewidths=1.2, alpha=0.8, zorder=5)
+    outside = ~inside & sampled
+    # group color for every interval, runs outside the MC CI additionally with an orange dotted line on top
+    for group, bar_color, alpha, dashes in [(~ft, CI_BAR, 0.4, "solid"), (ft, FT_BAR, 0.4, "solid"), (outside, OUTSIDE_BAR, 0.9, (0, (1.5, 1.5)))]:
+        for bars in [ax.errorbar(x[group], dem[group], xerr=np.clip([np.where(sampled, mc - mc_lo, 0)[group], (mc_hi - x)[group]], 0, None), fmt="none", ecolor=bar_color, alpha=alpha, linewidth=1, capsize=1.5, capthick=0.8, zorder=1), # clip float rounding
+                     ax.errorbar(x[group], dem[group], yerr=np.clip([(dem - dem_lo)[group], (dem_hi - dem)[group]], 0, None), fmt="none", ecolor=bar_color, alpha=alpha, linewidth=1.5, capsize=1.5, capthick=0.8, zorder=1)]:
+            for line in bars[2]:
+                line.set_linestyle(dashes)
+    shade = lambda w, cmap: cmap((np.clip(w, *WEIGHT_RANGE) - WEIGHT_RANGE[0]) / (WEIGHT_RANGE[1] - WEIGHT_RANGE[0]))
+    for group, cmap in [(~ft, WEIGHTS), (ft, FT_WEIGHTS)]:
+        ax.scatter(x[group & inside & sampled], dem[group & inside & sampled], color=shade(weight[group & inside & sampled], cmap), s=30, alpha=0.55, edgecolors="none", zorder=5)
+        ax.scatter(x[group & outside], dem[group & outside], color=shade(weight[group & outside], cmap), s=30, alpha=0.65, edgecolors=OUTSIDE, linewidths=1.3, zorder=6)
+        ax.scatter(x[group & ~sampled], dem[group & ~sampled], facecolors="none", edgecolors=shade(weight[group & ~sampled], cmap), s=30, linewidths=1.2, alpha=0.65, zorder=5)
 
     ax.set_xlim(limits)
     ax.set_ylim(limits)
@@ -76,23 +86,28 @@ def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric:
     ax.set_yscale("log")
     ax.minorticks_off()
 
-    handles = [Line2D([], [], color=REFERENCE, linewidth=3), Line2D([], [], color=CI_BAR, linewidth=1), Line2D([], [], color=CI_BAR, linewidth=1.5),
-               Line2D([], [], marker="o", color=OUTSIDE, linestyle="none")]
-    labels = ["exact agreement (DEM = MC)", "MC 95% confidence interval (Wilson, horizontal)", "DEM bounds (truncated fault sets, vertical)",
-              "run: DEM outside the MC 95% CI"]
+    handles = [Line2D([], [], color=REFERENCE, linewidth=3),
+               Line2D([], [], marker="o", markerfacecolor="none", markeredgecolor=OUTSIDE, markeredgewidth=1.3, color=OUTSIDE_BAR, linestyle=(0, (1.5, 1.5)))]
+    labels = ["exact agreement (DEM = MC)", "run: DEM LER outside the MC 95% CI"]
     if not sampled.all(): # MC estimate 0 not drawable on a log axis
         handles.append(Line2D([], [], marker="o", markerfacecolor="none", markeredgecolor=MUTED, linestyle="none"))
         labels.append("run: MC sampled 0 failures --> drawn at its upper CI end")
     handles.append(Line2D([], [], marker="o", color=SERIES, linestyle="none"))
-    labels.append("run: DEM inside the MC 95% CI (shade: enumerated faults, see scale)")
+    labels.append("run of a non-fault-tolerant circuit" if ft.any() else "run of a circuit")
+    if ft.any():
+        handles.append(Line2D([], [], marker="o", color=FT_WEIGHTS(0.5), linestyle="none"))
+        labels.append("run of a fault-tolerant circuit")
 
-    # discrete scale: one color per truncation weight the DEM needed
+    # discrete scale: one color per truncation weight the DEM needed (one scale per circuit group)
     levels = np.arange(WEIGHT_RANGE[0], WEIGHT_RANGE[1] + 1)
-    bar = fig.colorbar(ScalarMappable(BoundaryNorm(np.append(levels, levels[-1] + 1) - 0.5, len(levels)), ListedColormap(shade(levels))),
-                       ax=ax, ticks=levels, fraction=0.035, pad=0.03)
-    bar.set_label("DEM: fault sets enumerated up to ... faults", color=TEXT_SECONDARY, fontsize=9)
-    bar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9, length=0)
-    bar.outline.set_edgecolor(BASELINE)
+    for cmap, group_label in ([(WEIGHTS, "non-FT"), (FT_WEIGHTS, "FT")] if ft.any() else [(WEIGHTS, "")]):
+        bar = fig.colorbar(ScalarMappable(BoundaryNorm(np.append(levels, levels[-1] + 1) - 0.5, len(levels)), ListedColormap(shade(levels, cmap))),
+                           ax=ax, ticks=levels, fraction=0.035, pad=0.03)
+        bar.ax.set_title(group_label, color=TEXT_SECONDARY, fontsize=8)
+        if cmap is WEIGHTS: # outermost scale
+            bar.set_label("DEM: fault sets enumerated up to ... faults", color=TEXT_SECONDARY, fontsize=9)
+        bar.ax.tick_params(colors=MUTED, labelcolor=TEXT_SECONDARY, labelsize=9, length=0)
+        bar.outline.set_edgecolor(BASELINE)
     width = (dem_hi - dem_lo)[dem > 0] / dem[dem > 0]
     lines = [f"DEM inside MC 95% CI     {float(s['dem_in_mc_ci']):>8.1%}   (expected ≈ 95%)",
              f"MC CI and DEM overlap     {float(s['intervals_overlap']):>8.1%}",
@@ -100,8 +115,9 @@ def plot_scatter(s: dict, mc, mc_lo, mc_hi, dem, dem_lo, dem_hi, weight, metric:
              f"DEM bounds width / DEM    {np.median(width):>8.2g}   (median),  {np.max(width):.2g} (max)"]
     if s["median_speedup"] != "": # older raw results have no times
         lines.append(f"speedup DEM vs MC         {float(s['median_speedup']):>7.3g}×   (median),  {float(s['min_speedup']):.3g}× – {float(s['max_speedup']):.3g}× (range, MC time / DEM time)")
-    style(fig, ax, title, subtitle, f"MC {LABELS[metric]}", f"DEM {LABELS[metric]}", handles, labels, "Agreement: how close are the circuits to y = x?", lines)
-    save(fig, str(file))
+    style(fig, ax, title, subtitle, f"MC {LABELS[metric]} (+ 95% confidence interval)", f"DEM {LABELS[metric]} (+ bounds due to truncated fault sets)", handles, labels, "Agreement: how close are the circuits to y = x?", lines)
+    fig.savefig(file, dpi=400, facecolor=SURFACE, bbox_inches="tight", pad_inches=0.25) # higher dpi than the shared save()
+    plt.close(fig)
 
 
 def style(fig, ax, title: str, subtitle: str, x_label: str, y_label: str, handles, labels, header: str, lines: list[str]) -> None:
